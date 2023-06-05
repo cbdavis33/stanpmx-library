@@ -21,7 +21,7 @@ R <- diag(rep(1, times = 3))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0.0
+sigma_a <- 0.5
 
 cor_p_a <- 0
 
@@ -125,7 +125,8 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
   inner_join(nonmem_data_simulate %>% 
                mutate(i = 1:n()),
              by = "i") %>%
-  select(ID, AMT, II, ADDL, CMT, EVID, SS, TIME, DV = "dv", IPRED = "ipred") %>% 
+  select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME, 
+         DV = "dv", IPRED = "ipred") %>% 
   mutate(LLOQ = 1, 
          BLOQ = case_when(EVID == 1 ~ NA_real_,
                           DV <= LLOQ ~ 1,
@@ -153,11 +154,13 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
 p_1 +
   facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
-# data %>%
-#   select(-IPRED) %>% 
-#   write_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv", na = ".")
-# 
-# params_ind %>%
-#   write_csv("depot_1cmt_linear/Data/depot_1cmt_prop_params_ind.csv")
+data %>%
+  select(-IPRED) %>%
+  # write_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv", na = ".")
+  write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa.csv", na = ".")
+
+params_ind %>%
+  # write_csv("depot_1cmt_linear/Data/depot_1cmt_prop_params_ind.csv")
+  write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa_params_ind.csv")
 
 

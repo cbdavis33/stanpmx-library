@@ -7,7 +7,7 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv",
+nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_exp.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -105,17 +105,17 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_vc = 0.4,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
-                  scale_sigma_p = 0.5,
+                  scale_sigma = 0.5,
                   prior_only = 0)
 
-model <- cmdstan_model("depot_1cmt_linear/Stan/Fit/depot_1cmt_prop.stan",
-                       cpp_options = list(stan_threads = TRUE))
+model <- cmdstan_model(
+  "depot_1cmt_linear/Stan/Fit/depot_1cmt_exp_no_threading.stan")
 
 fit <- model$sample(data = stan_data,
                     seed = 11235,
                     chains = 4,
                     parallel_chains = 4,
-                    threads_per_chain = parallel::detectCores()/4,
+                    # threads_per_chain = parallel::detectCores()/4,
                     iter_warmup = 500,
                     iter_sampling = 1000,
                     adapt_delta = 0.8,
@@ -125,7 +125,7 @@ fit <- model$sample(data = stan_data,
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
                                            omega = rlnorm(3, log(0.3), 0.3),
-                                           sigma_p = rlnorm(1, log(0.2), 0.3)))
+                                           sigma = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
+fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_exp_no_threading.rds")
 

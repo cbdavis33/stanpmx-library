@@ -7,8 +7,10 @@
 .Rhistory
 .RData
 .Ruserdata
+*.Rproj
 
 *.exe 
+*.rds
 README.html
 
 *_cache

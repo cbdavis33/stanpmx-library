@@ -90,25 +90,29 @@ stan_data <- list(n_subjects = n_subjects,
                   omega_ka = omega_ka,
                   R = R,
                   sigma = sigma,
-                  solver = 1) # analytical = 1, mat exp = 2, rk45 = 3, bdf = 4
+                  t_1 = 144,
+                  t_2 = 168)
 
-model <- cmdstan_model("depot_1cmt_linear/Stan/Simulate/depot_1cmt_exp.stan") 
+model <- cmdstan_model(
+  "depot_1cmt_linear/Stan/Simulate/depot_1cmt_exp_with_cmax_tmax_auc.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 1123,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA")) %>% 
-  spread_draws(CL[i], VC[i], KA[i]) %>% 
+params_ind <- simulated_data$draws(c("CL", "VC", "KA", 
+                                     "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
+  spread_draws(CL[i], VC[i], KA[i], 
+               auc_t1_t2[i], c_max[i], t_max[i], t_half[i]) %>% 
   inner_join(dosing_data %>% 
                mutate(i = 1:n()),
              by = "i") %>% 
   ungroup() %>%
-  select(ID, CL, VC, KA)
+  select(ID, CL, VC, KA, auc_t1_t2, c_max, t_max, t_half)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -146,7 +150,7 @@ p_1 +
   facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 data %>%
-  select(-IPRED) %>% 
+  select(-IPRED) %>%
   write_csv("depot_1cmt_linear/Data/depot_1cmt_exp.csv", na = ".")
 
 params_ind %>%

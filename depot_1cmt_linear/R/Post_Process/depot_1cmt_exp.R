@@ -10,7 +10,7 @@ library(patchwork)
 library(posterior)
 library(tidyverse)
 
-nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv",
+nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_exp.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -29,13 +29,13 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
+fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_exp.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "ka")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             "sigma_p")
+                             "sigma")
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -73,12 +73,12 @@ mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVKA")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_ka")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("sigma_p")),
+mcmc_combo(fit$draws(c("sigma")),
            combo = c("dens_overlay", "trace"))
 
 mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVKA")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka")))
-mcmc_rank_hist(fit$draws(c("sigma_p")))
+mcmc_rank_hist(fit$draws(c("sigma")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo()

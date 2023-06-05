@@ -108,8 +108,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_p = 0.5,
                   prior_only = 0)
 
-model <- cmdstan_model("depot_1cmt_linear/Stan/Fit/depot_1cmt_prop.stan",
-                       cpp_options = list(stan_threads = TRUE))
+model <- cmdstan_model(
+  "depot_1cmt_linear/Stan/Fit/depot_1cmt_prop_no_threading.stan")
 
 fit <- model$sample(data = stan_data,
                     seed = 11235,
@@ -127,5 +127,5 @@ fit <- model$sample(data = stan_data,
                                            omega = rlnorm(3, log(0.3), 0.3),
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
+fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop_no_threading.rds")
 

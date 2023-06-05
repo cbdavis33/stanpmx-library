@@ -1,7 +1,7 @@
 // First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model
 // IIV on CL, VC, and Ka (full covariance matrix)
-// proportional error - DV = CP(1 + eps_p)
+// proportional error - DV = IPRED*(1 + eps_p)
 // Any of analytical, matrix-exponential, or general ODE solution (rk45 or bdf) 
 //   using Torsten (user's choice)
 // Implements threading for within-chain parallelization 
@@ -244,6 +244,8 @@ data{
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
   
+  int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
+  
   int<lower = 1, upper = 4> solver; // 1 = analytical, 2 = matrix exponential, 3 = rk45, 4 = bdf
  
 }
@@ -328,15 +330,17 @@ model{
   to_vector(Z) ~ std_normal();
   
   // Likelihood
-  target += reduce_sum(partial_sum_lupmf, seq_subj, grainsize,
-                       dv_obs, dv_obs_id, i_obs,
-                       amt, cmt, evid, time, 
-                       rate, ii, addl, ss, subj_start, subj_end, 
-                       CL, VC, KA,
-                       sigma_p,
-                       lloq, bloq,
-                       n_random, n_subjects, n_total,
-                       bioav, tlag, n_cmt, solver);
+  if(prior_only == 0){
+    target += reduce_sum(partial_sum_lupmf, seq_subj, grainsize,
+                         dv_obs, dv_obs_id, i_obs,
+                         amt, cmt, evid, time, 
+                         rate, ii, addl, ss, subj_start, subj_end, 
+                         CL, VC, KA,
+                         sigma_p,
+                         lloq, bloq,
+                         n_random, n_subjects, n_total,
+                         bioav, tlag, n_cmt, solver);
+  }
 }
 generated quantities{
   
