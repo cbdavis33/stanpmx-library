@@ -371,39 +371,17 @@ residuals %>%
   scale_x_continuous(name = "Time (h)",
                      limits = c(NA, NA))
 
-# We can look at individual posterior densities on top of the density of the 
-# population parameter
-blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], TVCL, TVVC, TVKA) %>%
+# We can look at individual posterior densities
+draws_df %>%
+  gather_draws(CL[ID], VC[ID], KA[ID]) %>%
   ungroup() %>%
-  mutate(across(c(ID, .variable), as.factor))
-
-ggplot() +
-  geom_density(data = blah %>% 
-                 filter(is.na(ID)) %>% 
-                 mutate(.variable = blah %>% 
-                          filter(is.na(ID)) %>% 
-                          pull(.variable) %>% 
-                          str_remove("TV"),
-                        ID = "Population"),
-               mapping = aes(x = .value, group = .variable,
-                             fill = .variable), color = "black",
-               position = "identity") +
-  stat_density(data = blah %>% 
-                 filter(!is.na(ID)), 
-               mapping = aes(x = .value, group = ID, color = ID),
-               geom = "line", position = "identity") +
+  mutate(across(c(ID, .variable), as.factor)) %>%
+  ggplot(aes(x = .value, group = ID, color = ID)) +
+  stat_density(geom = "line", position = "identity") +
   theme_bw() +
   theme(axis.title.x = element_blank(),
         plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
-  theme(legend.position = "bottom") +
-  scale_fill_manual(name = "Population Parameter",
-                    values = c("red", "blue", "green")) +
-  guides(color = "none") +
-  ggtitle("Individual Parameter Posterior Densities") 
-
-
-
+  ggtitle("Individual Parameter Posterior Densities")
 
 

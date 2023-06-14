@@ -303,11 +303,12 @@ residuals %>%
          qn_upper = qnorm(0.975)) %>% 
   ggplot(aes(x = time, y = iwres)) + 
   geom_point() +
-  geom_hline(yintercept = 0, color = "blue", size = 1.5) +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
   geom_hline(aes(yintercept = qn_lower), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
   geom_hline(aes(yintercept = qn_upper), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.5) +
   theme_bw() +
   xlab("Time (h)") +
   facet_wrap(~ .draw, labeller = label_both)
@@ -319,12 +320,12 @@ residuals %>%
          qn_upper = qnorm(0.975)) %>% 
   ggplot(aes(x = ipred, y = iwres)) + 
   geom_point() +
-  geom_smooth(se = FALSE, color = "red", size = 1.5) +
-  geom_hline(yintercept = 0, color = "blue", size = 1.5) +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
   geom_hline(aes(yintercept = qn_lower), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
   geom_hline(aes(yintercept = qn_upper), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", size = 1.5) +
   theme_bw() +
   facet_wrap(~ .draw, labeller = label_both)
 
@@ -335,12 +336,12 @@ some_residuals_scatter <- residuals %>%
          qn_upper = qnorm(0.975)) %>%
   ggplot(aes(x = time, y = iwres)) + 
   geom_point() +
-  geom_smooth(se = FALSE, color = "red", size = 1.5) +
-  geom_hline(yintercept = 0, color = "blue", size = 1.5) +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
   geom_hline(aes(yintercept = qn_lower), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
   geom_hline(aes(yintercept = qn_upper), linetype = "dashed", color = "blue",
-             size = 1.25) +
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.5) +
   theme_bw() +
   transition_manual(.draw)
 
@@ -371,17 +372,36 @@ residuals %>%
   scale_x_continuous(name = "Time (h)",
                      limits = c(NA, NA))
 
-# We can look at individual posterior densities
-draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID]) %>%
+# We can look at individual posterior densities on top of the density of the 
+# population parameter
+blah <- draws_df %>%
+  gather_draws(CL[ID], VC[ID], KA[ID], TVCL, TVVC, TVKA) %>%
   ungroup() %>%
-  mutate(across(c(ID, .variable), as.factor)) %>%
-  ggplot(aes(x = .value, group = ID, color = ID)) +
-  stat_density(geom = "line", position = "identity") +
+  mutate(across(c(ID, .variable), as.factor))
+
+ggplot() +
+  geom_density(data = blah %>% 
+                 filter(is.na(ID)) %>% 
+                 mutate(.variable = blah %>% 
+                          filter(is.na(ID)) %>% 
+                          pull(.variable) %>% 
+                          str_remove("TV"),
+                        ID = "Population"),
+               mapping = aes(x = .value, group = .variable,
+                             fill = .variable), color = "black",
+               position = "identity") +
+  stat_density(data = blah %>% 
+                 filter(!is.na(ID)), 
+               mapping = aes(x = .value, group = ID, color = ID),
+               geom = "line", position = "identity") +
   theme_bw() +
   theme(axis.title.x = element_blank(),
         plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
-  ggtitle("Individual Parameter Posterior Densities")
+  theme(legend.position = "bottom") +
+  scale_fill_manual(name = "Population Parameter",
+                    values = c("red", "blue", "green")) +
+  guides(color = "none") +
+  ggtitle("Individual Parameter Posterior Densities") 
 
 

@@ -10,7 +10,7 @@ library(patchwork)
 library(posterior)
 library(tidyverse)
 
-nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_ppa.csv",
+nonmem_data <- read_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -29,13 +29,13 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_ppa.rds")
+fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "ka")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             str_c("sigma_", c("p", "a")))
+                             "sigma_p")
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -73,12 +73,12 @@ mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVKA")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_ka")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("sigma_p", "sigma_a")),
+mcmc_combo(fit$draws(c("sigma_p")),
            combo = c("dens_overlay", "trace"))
 
 mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVKA")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka")))
-mcmc_rank_hist(fit$draws(c("sigma_p", "sigma_a")))
+mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo()
@@ -371,39 +371,17 @@ residuals %>%
   scale_x_continuous(name = "Time (h)",
                      limits = c(NA, NA))
 
-# We can look at individual posterior densities on top of the density of the 
-# population parameter
-blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], TVCL, TVVC, TVKA) %>%
+# We can look at individual posterior densities
+draws_df %>%
+  gather_draws(CL[ID], VC[ID], KA[ID]) %>%
   ungroup() %>%
-  mutate(across(c(ID, .variable), as.factor))
-
-ggplot() +
-  geom_density(data = blah %>% 
-                 filter(is.na(ID)) %>% 
-                 mutate(.variable = blah %>% 
-                          filter(is.na(ID)) %>% 
-                          pull(.variable) %>% 
-                          str_remove("TV"),
-                        ID = "Population"),
-               mapping = aes(x = .value, group = .variable,
-                             fill = .variable), color = "black",
-               position = "identity") +
-  stat_density(data = blah %>% 
-                 filter(!is.na(ID)), 
-               mapping = aes(x = .value, group = ID, color = ID),
-               geom = "line", position = "identity") +
+  mutate(across(c(ID, .variable), as.factor)) %>%
+  ggplot(aes(x = .value, group = ID, color = ID)) +
+  stat_density(geom = "line", position = "identity") +
   theme_bw() +
   theme(axis.title.x = element_blank(),
         plot.title = element_text(hjust = 0.5)) +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
-  theme(legend.position = "bottom") +
-  scale_fill_manual(name = "Population Parameter",
-                    values = c("red", "blue", "green")) +
-  guides(color = "none") +
-  ggtitle("Individual Parameter Posterior Densities") 
-
-
-
+  ggtitle("Individual Parameter Posterior Densities")
 
 
