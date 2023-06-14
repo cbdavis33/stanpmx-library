@@ -181,4 +181,5 @@ target_comparison_tv /
   target_comparison_cor /
   target_comparison_error +
   plot_layout(guides = 'collect', 
-              design = layout) 
+              design = layout) &
+  theme(legend.position = "bottom")
