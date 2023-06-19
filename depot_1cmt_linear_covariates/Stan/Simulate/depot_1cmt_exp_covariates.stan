@@ -6,7 +6,7 @@
 // Covariates: 
 //   1) Body Weight on CL and VC - (wt/70)^theta
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
-//.     on KA (0/1) - exp(theta*cmppi)
+//      on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
 
 functions{
