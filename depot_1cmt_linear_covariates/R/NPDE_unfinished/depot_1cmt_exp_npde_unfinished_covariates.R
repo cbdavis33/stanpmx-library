@@ -95,12 +95,12 @@ ipreds_col <- preds_df %>%
   summarize(ipred_mean = mean(ipred)) %>% 
   ungroup() %>% 
   bind_cols(new_data %>% 
-              select(ID, time, evid)) %>% 
+              select(ID, time, evid, cmppi)) %>% 
   filter(evid == 0) %>% 
   select(ID, time, ipred_mean, -i)
 
 obs <- nonmem_data %>% 
-  select(ID, time, dv = "DV", amt, evid, bloq, mdv) %>% 
+  select(ID, time, dv = "DV", amt, evid, bloq, mdv, cmppi) %>% 
   filter(evid == 0) %>% 
   mutate(dv = if_else(bloq == 1, 1, dv)) %>% 
   left_join(ipreds_col, by = c("ID", "time"))
@@ -123,7 +123,7 @@ my_npde <- autonpde(namobs = obs %>%
                       select(ID, time, dv, bloq, ipred_mean), 
                     namsim = sim, 
                     iid = "ID", ix = "time", iy = "dv", icens = "bloq",
-                    iipred = "ipred_mean",
+                    iipred = "ipred_mean", icov = "cmppi",
                     cens.method = "omit")
 
 my_npde@results@res %>% 
