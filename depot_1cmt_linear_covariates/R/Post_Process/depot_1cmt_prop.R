@@ -11,7 +11,7 @@ library(posterior)
 library(tidyverse)
 
 nonmem_data <- read_csv(
-  "depot_1cmt_linear_covariates//Data/depot_1cmt_ppa_covariates.csv",
+  "depot_1cmt_linear_covariates//Data/depot_1cmt_prop_covariates.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -31,14 +31,13 @@ nonmem_data %>%
 
 ## Read in fit
 fit <- read_rds(
-  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_ppa_covariates.rds")
+  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_no_covariates.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
-                             str_subset(fit$metadata()$stan_variables, "theta"),
                              str_c("omega_", c("cl", "vc", "ka")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             str_c("sigma_", c("p", "a")))
+                             "sigma_p")
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -74,19 +73,14 @@ summary %>%
 # Density Plots and Traceplots
 mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVKA")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                       "theta_ka_cmppi", "theta_cl_egfr")),
-           combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_ka")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("sigma_p", "sigma_a")),
+mcmc_combo(fit$draws(c("sigma_p")),
            combo = c("dens_overlay", "trace"))
 
 mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVKA")))
-mcmc_rank_hist(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                           "theta_ka_cmppi", "theta_cl_egfr")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka")))
-mcmc_rank_hist(fit$draws(c("sigma_p", "sigma_a")))
+mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo()
@@ -565,7 +559,6 @@ draws_for_covariate_examination <- draws_df %>%
     scale_y_continuous(name = "Indiv. Effect") +
     theme_bw(18) +
     geom_hline(yintercept = 0, linetype = "dashed") +
-    
     facet_wrap(~.variable, scales = "free", labeller = label_parsed))
 
 (p_draws_race <- draws_for_covariate_examination %>% 
@@ -695,7 +688,7 @@ p_point_egfr /
     ggplot(aes(x = eta_cl, y = eta_vc)) + 
     geom_point() +
     theme_bw() + 
-    geom_smooth() +
+    geom_smooth(method = "loess", span = 0.9) +
     ggtitle("Point Estimates")) +
   (draws_df %>%
      sample_draws(10) %>%
@@ -709,7 +702,7 @@ p_point_egfr /
      ggplot(aes(x = eta_cl, y = eta_vc)) + 
      geom_point() +
      theme_bw() + 
-     geom_smooth(method = "loess") +
+     geom_smooth(method = "loess", span = 0.9) +
      ggtitle("Samples"))
 
 
