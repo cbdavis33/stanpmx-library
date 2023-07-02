@@ -142,7 +142,8 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_cor <- draws_all_df %>% 
-    filter(str_detect(variable, "cor_")) %>% 
+    filter(variable %in% c("cor_cl_vc", "cor_cl_q", "cor_cl_vp",
+                           "cor_vc_q", "cor_vc_vp", "cor_q_vp")) %>% 
     mutate(variable = factor(variable, 
                              levels = c("cor_cl_vc", "cor_cl_q", "cor_cl_vp",
                                         "cor_vc_q", "cor_vc_vp", "cor_q_vp")),
