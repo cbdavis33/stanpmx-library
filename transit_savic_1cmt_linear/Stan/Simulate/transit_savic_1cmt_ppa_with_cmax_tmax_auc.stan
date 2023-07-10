@@ -2,7 +2,7 @@
 // IIV on CL, VC, KA, NTR, MTT (full covariance matrix)
 // n_transit is a positive real number, not fixed, and not necessarily an integer
 // General ODE solution using pure Stan code
-// proportional plus additive error - DV = CP(1 + eps_p) + eps_a
+// proportional plus additive error - DV = IPRED(1 + eps_p) + eps_a
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
 // Drug is absorbed from the depot through the transit compartments into the 
@@ -27,45 +27,40 @@ functions{
   
   vector transit_1cmt_ode(real t, 
                           vector y,
-                          real cl, real vc, real ka, 
-                          real n_tr, real mtt, real f,
-                          int n_dose_subj,             // # of doses for this subject
-                          array[] real dosetime_subj,  // dosetimes for this subject
-                          array[] real doseamt_subj,   // dose amounts for this subject
+                          real ke, real vc, real ka, real n_tr, real f, 
+                          real ktr, 
+                          int n_dose_subj,            // # of doses for this subject
+                          array[] real dosetime_subj, // dosetimes for this subject
+                          array[] real doseamt_subj,  // dose amounts for this subject
                           real t_1, real t_2){ 
     
-    real ktr = (n_tr + 1)/mtt;
-    // real k_inpt = f*pow(ktr, n_tr + 1)/exp(lgamma(n_tr + 1));
-    real log_k_inpt = log(f) + (n_tr + 1)*log(ktr) - lgamma(n_tr + 1);
-    real log_inpt;
-    array[n_dose_subj] real log_ipt = rep_array(negative_infinity(), n_dose_subj); 
+    // real ktr = (n_tr + 1)/mtt;
+    real k_inpt = f*pow(ktr, n_tr + 1)/exp(lgamma(n_tr + 1));
     
-    real ke = cl/vc;
+    real inpt = 0;
+    array[n_dose_subj] real ipt = rep_array(0.0, n_dose_subj);
     
     vector[6] dydt;
-    real slope = ka*y[1] -ke*y[2];
+    real slope = ka*y[1] - ke*y[2];
     real x = (slope > 0 && y[2]/vc > y[5]) ? slope/vc : 0;
     real z = t <= t_1 || (slope > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
     for(i in 1:n_dose_subj){
       if(t >= dosetime_subj[i]){
         real delta_t = t - dosetime_subj[i];
-        // ipt[i] = doseamt_subj[i]*pow(delta_t, n_tr)*exp(-ktr*delta_t);
-        log_ipt[i] = log(doseamt_subj[i]) + n_tr*log(delta_t) - ktr*delta_t;
+        ipt[i] = doseamt_subj[i]*pow(delta_t, n_tr)*exp(-ktr*delta_t);
       }
     }
     
-    // inpt = sum(ipt);
-    // inpt = exp(log_sum_exp(log_ipt));
-    log_inpt = log_sum_exp(log_ipt);
+    inpt = sum(ipt);
     
-    dydt[1] = exp(log_k_inpt + log_inpt) - ka*y[1];
+    dydt[1] = k_inpt*inpt - ka*y[1];
     dydt[2] = slope;
     dydt[3] = y[2];                                // AUC
     dydt[4] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
     dydt[5] = x;                                   // C_max 
     dydt[6] = z;                                   // t_max 
-
+    
     return dydt;
     
   }
@@ -165,6 +160,7 @@ generated quantities{
   vector[n_subjects] NTR;
   vector[n_subjects] MTT;
   vector[n_subjects] KE;
+  vector[n_subjects] KTR;
   
   {
     
@@ -188,6 +184,7 @@ generated quantities{
     NTR = col(theta, 4);
     MTT = col(theta, 5);
     KE = CL ./ VC;
+    KTR = (NTR + 1) ./ MTT;
   
     for(j in 1:n_subjects){
       
@@ -204,25 +201,25 @@ generated quantities{
       if(solver == 1){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_rk45(transit_1cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                   CL[j], VC[j], KA[j], NTR[j], MTT[j], bioav[j],
+                   KE[j], VC[j], KA[j], NTR[j], bioav[j], KTR[j],
                    n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }else if(solver == 2){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_bdf(transit_1cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                  CL[j], VC[j], KA[j], NTR[j], MTT[j], bioav[j],
+                  KE[j], VC[j], KA[j], NTR[j], bioav[j], KTR[j],
                   n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }else if(solver == 3){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_adams(transit_1cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                    CL[j], VC[j], KA[j], NTR[j], MTT[j], bioav[j],
+                    KE[j], VC[j], KA[j], NTR[j], bioav[j], KTR[j],
                     n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }else{
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_ckrk(transit_1cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                   CL[j], VC[j], KA[j], NTR[j], MTT[j], bioav[j],
+                   KE[j], VC[j], KA[j], NTR[j], bioav[j], KTR[j],
                    n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }

@@ -2,7 +2,7 @@
 // IIV on CL, VC, Q, VP, KA, NTR, MTT (full covariance matrix)
 // n_transit is a positive real number, not fixed, and not necessarily an integer
 // General ODE solution using pure Stan code
-// proportional plus additive error - DV = CP(1 + eps_p) + eps_a
+// proportional plus additive error - DV = IPRED(1 + eps_p) + eps_a
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
 // Drug is absorbed from the depot through the transit compartments into the 

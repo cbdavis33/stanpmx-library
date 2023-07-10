@@ -9,9 +9,9 @@ library(tidyverse)
 
 set_cmdstan_path("~/.cmdstan/cmdstan-2.31.0/")
 
-TVCL <- 0.5
-TVVC <- 12
-TVKA <- 1
+TVCL <- 1
+TVVC <- 20
+TVKA <- 2
 TVNTR <- 6
 TVMTT <- 1
 
@@ -26,9 +26,9 @@ R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma <- 0.2
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 4
 
-dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
+dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 1, ii = 24, 
                          cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0,
                          evid = 1) %>%
   realize_addl() %>% 
@@ -37,16 +37,11 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
   select(ID, TIME, everything())
 
 dense_grid <- c(seq(0.1, 1.9, by = 0.1), seq(2, 24, by = 1),
-                seq(24.1, 25.9, by = 0.1), seq(26, 48, by = 1),
-                seq(48.1, 49.9, by = 0.1), seq(50, 72, by = 1),
-                seq(72.1, 73.9, by = 0.1), seq(74, 96, by = 1),
-                seq(96.1, 97.9, by = 0.1), seq(98, 120, by = 1),
-                seq(120.1, 121.9, by = 0.1), seq(122, 144, by = 1),
-                seq(144.1, 145.9, by = 0.1), seq(146, 168, by = 1))
+                seq(24.1, 25.9, by = 0.1), seq(26, 48, by = 1))
 
 
 sampling_times <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
-realistic_times <- c(sampling_times, 72, 144, 144 + sampling_times)
+realistic_times <- c(sampling_times, 24 + sampling_times)
 
 times_to_simulate <- realistic_times # dense_grid
 

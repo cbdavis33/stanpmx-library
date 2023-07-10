@@ -134,13 +134,13 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start_dose = subj_start_dose,
                   subj_end_dose = subj_end_dose,
                   prior_only = 0,
-                  solver = 1)
+                  solver = 4)
 
 model <- cmdstan_model(
   "transit_savic_1cmt_linear/Stan/Fit/transit_savic_1cmt_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit_rk45 <- model$sample(
+fit <- model$sample(
   data = stan_data,
   seed = 11235813,
   chains = 4,
@@ -149,7 +149,7 @@ fit_rk45 <- model$sample(
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.9,
-  refresh = 10,
+  refresh = 50,
   max_treedepth = 10,
   init = function() list(TVCL = rlnorm(1, log(0.4), 0.3),
                          TVVC = rlnorm(1, log(15), 0.3),
@@ -159,73 +159,5 @@ fit_rk45 <- model$sample(
                          omega = rlnorm(5, log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit_rk45$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_rk45.rds")
-
-
-stan_data$solver <- 2
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVKA = rlnorm(1, log(0.8), 0.3),
-                         TVNTR = rlnorm(1, log(5), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_bdf.rds")
-
-
-stan_data$solver <- 3
-fit_adams <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVKA = rlnorm(1, log(0.8), 0.3),
-                         TVNTR = rlnorm(1, log(5), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_adams$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_adams.rds")
-
-stan_data$solver <- 4
-fit_ckrk <- model$sample(
-  data = stan_data,
-  seed = 1123532,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.95,
-  refresh = 500,
-  max_treedepth = 15,
-  init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                         TVVC = rlnorm(1, log(20), 0.3),
-                         TVKA = rlnorm(1, log(1.8), 0.3),
-                         TVNTR = rlnorm(1, log(5), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_ckrk$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_ckrk.rds")
+fit$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop.rds")
 

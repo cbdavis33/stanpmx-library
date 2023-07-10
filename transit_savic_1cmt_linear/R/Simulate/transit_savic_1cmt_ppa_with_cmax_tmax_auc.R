@@ -9,9 +9,9 @@ library(tidyverse)
 
 set_cmdstan_path("~/.cmdstan/cmdstan-2.31.0/")
 
-TVCL <- 0.5
-TVVC <- 12
-TVKA <- 1
+TVCL <- 1
+TVVC <- 20
+TVKA <- 2
 TVNTR <- 6
 TVMTT <- 1
 
@@ -29,9 +29,9 @@ sigma_a <- 0
 
 cor_p_a <- 0
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 4
 
-dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
+dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 1, ii = 24, 
                          cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0,
                          evid = 1) %>%
   realize_addl() %>% 
@@ -40,16 +40,11 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
   select(ID, TIME, everything())
 
 dense_grid <- c(seq(0.1, 1.9, by = 0.1), seq(2, 24, by = 1),
-                seq(24.1, 25.9, by = 0.1), seq(26, 48, by = 1),
-                seq(48.1, 49.9, by = 0.1), seq(50, 72, by = 1),
-                seq(72.1, 73.9, by = 0.1), seq(74, 96, by = 1),
-                seq(96.1, 97.9, by = 0.1), seq(98, 120, by = 1),
-                seq(120.1, 121.9, by = 0.1), seq(122, 144, by = 1),
-                seq(144.1, 145.9, by = 0.1), seq(146, 168, by = 1))
+                seq(24.1, 25.9, by = 0.1), seq(26, 48, by = 1))
 
 
 sampling_times <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
-realistic_times <- c(sampling_times, 72, 144, 144 + sampling_times)
+realistic_times <- c(sampling_times, 24 + sampling_times)
 
 times_to_simulate <- realistic_times # dense_grid
 
@@ -131,8 +126,8 @@ stan_data <- list(n_subjects = n_subjects,
                   doseamt = nonmem_data_dose$AMT,
                   subj_start_dose = subj_start_dose,
                   subj_end_dose = subj_end_dose,
-                  t_1 = 144,
-                  t_2 = 168,
+                  t_1 = 0,
+                  t_2 = 24,
                   solver = 4)
 
 model <- cmdstan_model(
@@ -140,7 +135,7 @@ model <- cmdstan_model(
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               seed = 11235813,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,

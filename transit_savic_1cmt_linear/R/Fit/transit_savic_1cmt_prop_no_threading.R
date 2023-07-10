@@ -5,8 +5,7 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
-# set_cmdstan_path("~/Torsten/cmdstan")
-set_cmdstan_path("~/.cmdstan/cmdstan-2.31.0/")
+set_cmdstan_path("~/Torsten/cmdstan")
 
 nonmem_data <- read_csv("transit_savic_1cmt_linear/Data/transit_savic_1cmt_prop.csv",
                         na = ".") %>% 
@@ -113,8 +112,8 @@ stan_data <- list(n_subjects = n_subjects,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
                   location_tvcl = 1,
-                  location_tvvc = 8,
-                  location_tvka = 0.8,
+                  location_tvvc = 18,
+                  location_tvka = 1.8,
                   location_tvntr = 5,
                   location_tvmtt = 1,
                   scale_tvcl = 1,
@@ -134,21 +133,21 @@ stan_data <- list(n_subjects = n_subjects,
                   doseamt = nonmem_data_dose$amt,
                   subj_start_dose = subj_start_dose,
                   subj_end_dose = subj_end_dose,
-                  prior_only = 1,
-                  solver = 1)
+                  prior_only = 0,
+                  solver = 4)
 
 model <- cmdstan_model(
   "transit_savic_1cmt_linear/Stan/Fit/transit_savic_1cmt_prop_no_threading.stan")
 
 fit <- model$sample(
   data = stan_data,
-  seed = 11235,
-  chains = 1,
-  parallel_chains = 1,
+  seed = 11235813,
+  chains = 4,
+  parallel_chains = 4,
   iter_warmup = 500,
-  iter_sampling = 1,
-  adapt_delta = 0.8,
-  refresh = 500,
+  iter_sampling = 1000,
+  adapt_delta = 0.9,
+  refresh = 50,
   max_treedepth = 10,
   init = function() list(TVCL = rlnorm(1, log(0.4), 0.3),
                          TVVC = rlnorm(1, log(15), 0.3),
@@ -158,5 +157,6 @@ fit <- model$sample(
                          omega = rlnorm(5, log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object("transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_no_threading.rds")
+fit$save_object(
+  "transit_savic_1cmt_linear/Stan/Fits/transit_savic_1cmt_prop_no_threading.rds")
 

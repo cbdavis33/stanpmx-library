@@ -2,8 +2,7 @@
 // IIV on CL, VC, KA, NTR, MTT (full covariance matrix)
 // n_transit is a positive real number, not fixed, and not necessarily an integer
 // General ODE solution using pure Stan code
-// proportional error - DV = IPRED*(1 + eps_p)
-// Implements threading for within-chain parallelization
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Deals with BLOQ values by the "CDF trick" (M4)
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
@@ -16,52 +15,6 @@
 
 
 functions{
-  
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
-  
-  int num_between(int lb, int ub, array[] int y){
-    
-    int n = 0;
-    for(i in 1:num_elements(y)){
-      if(y[i] >= lb && y[i] <= ub)
-                    n = n + 1;
-    }
-    return n;
-    
-  }
-  
-  array[] int find_between(int lb, int ub, array[] int y) {
-    // vector[num_between(lb, ub, y)] result;
-    array[num_between(lb, ub, y)] int result;
-    int n = 1;
-    for (i in 1:num_elements(y)) {
-      if (y[i] >= lb && y[i] <= ub) {
-        result[n] = y[i];
-        n = n + 1;
-      }
-    }
-    return result;
-  }
-  
-  vector find_between_vec(int lb, int ub, array[] int idx, vector y) {
-    
-    vector[num_between(lb, ub, idx)] result;
-    int n = 1;
-    if(num_elements(idx) != num_elements(y)) reject("illegal input");
-    for (i in 1:rows(y)) {
-      if (idx[i] >= lb && idx[i] <= ub) {
-        result[n] = y[i];
-        n = n + 1;
-      }
-    }
-    return result;
-  }
   
   real normal_lb_rng(real mu, real sigma, real lb){
     
@@ -102,106 +55,6 @@ functions{
     
     return dydt;
     
-  }
-  
-  real partial_sum_lpmf(array[] int seq_subj, int start, int end,
-                        vector dv_obs, array[] int dv_obs_id, array[] int i_obs,
-                        array[] real amt, array[] int cmt, array[] int evid, 
-                        array[] real time, array[] real rate, array[] real ii, 
-                        array[] int addl, array[] int ss,
-                        array[] int subj_start, array[] int subj_end,
-                        array[] int subj_start_dose, array[] int subj_end_dose,
-                        vector KE, vector VC, vector KA, vector NTR, vector KTR,
-                        real sigma_p,
-                        vector lloq, array[] int bloq,
-                        int n_random, int n_subjects, int n_total,
-                        array[] real dosetime, array[] real doseamt,
-                        array[] real bioav, int n_cmt, vector y0, int solver){
-                           
-    real ptarget = 0;
-    
-    int N = end - start + 1;        // number of subjects in this slice  
-    
-    vector[n_total] dv_ipred;       ;
-    array[n_total] vector[n_cmt] x_ipred;
-
-    int n_obs_slice = num_between(subj_start[start], subj_end[end], i_obs);
-    array[n_obs_slice] int i_obs_slice = find_between(subj_start[start], 
-                                                      subj_end[end], i_obs);
-                                                
-    vector[n_obs_slice] dv_obs_slice = find_between_vec(start, end, 
-                                                        dv_obs_id, dv_obs);
-    
-    vector[n_obs_slice] ipred_slice;
-    
-    vector[n_obs_slice] lloq_slice = lloq[i_obs_slice];
-    array[n_obs_slice] int bloq_slice = bloq[i_obs_slice];
-    
-    for(n in 1:N){            // loop over subjects in this slice
-    
-      int j = n + start - 1; // j is the ID of the current subject
-      
-      real t0 = time[subj_start[j]];
-      int n_dose_subj = subj_end_dose[j] - subj_start_dose[j] + 1;
-      
-      array[n_dose_subj] real dosetime_subj = 
-        dosetime[subj_start_dose[j]:subj_end_dose[j]];
-      array[n_dose_subj] real doseamt_subj = 
-        doseamt[subj_start_dose[j]:subj_end_dose[j]];
-        
-      x_ipred[subj_start[j],] = y0;
-
-      if(solver == 1){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] = 
-          ode_rk45(transit_1cmt_ode, y0, t0, 
-                   time[(subj_start[j] + 1):subj_end[j]], 
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-      }else if(solver == 2){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] = 
-          ode_bdf(transit_1cmt_ode, y0, t0, 
-                  time[(subj_start[j] + 1):subj_end[j]], 
-                  KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                  n_dose_subj, dosetime_subj, doseamt_subj);
-      }else if(solver == 3){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] = 
-          ode_adams(transit_1cmt_ode, y0, t0, 
-                   time[(subj_start[j] + 1):subj_end[j]], 
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-      }else{
-        x_ipred[(subj_start[j] + 1):subj_end[j],] = 
-          ode_ckrk(transit_1cmt_ode, y0, t0, 
-                   time[(subj_start[j] + 1):subj_end[j]], 
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-      }
-      
-      for(k in subj_start[j]:subj_end[j]){
-        dv_ipred[k] = fmax(0.000000001, x_ipred[k, 2] / VC[j]);
-        // dv_ipred[k] = x_ipred[k, 2] / VC[j];
-        
-      }
-    
-    }
-  
-    ipred_slice = dv_ipred[i_obs_slice];
-    
-    for(i in 1:n_obs_slice){
-      real sigma_tmp = ipred_slice[i]*sigma_p;
-      if(bloq_slice[i] == 1){
-        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
-                                                            sigma_tmp),
-                                normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
-      }else{
-        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
-      }
-    }                                         
-                              
-    return ptarget;
-                           
   }
   
 }
@@ -248,6 +101,9 @@ data{
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
   
   int n_dose;
   array[n_dose] real dosetime;
@@ -263,8 +119,6 @@ data{
 }
 transformed data{ 
   
-  int grainsize = 1;
-  
   vector<lower = 0>[n_obs] dv_obs = dv[i_obs];
   array[n_obs] int dv_obs_id = ID[i_obs];
   
@@ -277,8 +131,8 @@ transformed data{
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc,
                                       scale_omega_ka, scale_omega_ntr,
                                       scale_omega_mtt}; 
-  
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+                                      
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
   
   array[n_subjects] real bioav = rep_array(1.0, n_subjects); // Hardcoding, but could be data or a parameter in another situation
 
@@ -296,7 +150,8 @@ parameters{
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -315,6 +170,17 @@ transformed parameters{
   vector[n_subjects] MTT;
   vector[n_subjects] KE;
   vector[n_subjects] KTR;
+  
+  real<lower = 0> sigma_p = sigma[1];
+  real<lower = 0> sigma_a = sigma[2];
+  
+  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq_a = square(sigma_a);
+  
+  real cor_p_a;
+  real sigma_p_a;
+  
+  vector[n_obs] ipred;
 
   {
   
@@ -325,6 +191,12 @@ transformed parameters{
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
+                          
+    vector[n_total] dv_ipred;
+    array[n_total] vector[n_cmt] x_ipred;
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
@@ -338,7 +210,56 @@ transformed parameters{
     MTT = col(theta, 5);
     KE = CL ./ VC;
     KTR = (NTR + 1) ./ MTT;
-  
+    
+    cor_p_a = R_Sigma[1, 2];
+    sigma_p_a = Sigma[1, 2];
+    
+    for(j in 1:n_subjects){
+
+      real t0 = time[subj_start[j]];
+      int n_dose_subj = subj_end_dose[j] - subj_start_dose[j] + 1;
+
+      array[n_dose_subj] real dosetime_subj =
+        dosetime[subj_start_dose[j]:subj_end_dose[j]];
+      array[n_dose_subj] real doseamt_subj =
+        doseamt[subj_start_dose[j]:subj_end_dose[j]];
+
+      x_ipred[subj_start[j],] = y0;
+
+      if(solver == 1){
+        x_ipred[(subj_start[j] + 1):subj_end[j],] =
+          ode_rk45(transit_1cmt_ode, y0, t0,
+                   time[(subj_start[j] + 1):subj_end[j]],
+                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
+                   n_dose_subj, dosetime_subj, doseamt_subj);
+      }else if(solver == 2){
+        x_ipred[(subj_start[j] + 1):subj_end[j],] =
+          ode_bdf(transit_1cmt_ode, y0, t0,
+                   time[(subj_start[j] + 1):subj_end[j]],
+                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
+                   n_dose_subj, dosetime_subj, doseamt_subj);
+      }else if(solver == 3){
+        x_ipred[(subj_start[j] + 1):subj_end[j],] =
+          ode_adams(transit_1cmt_ode, y0, t0,
+                    time[(subj_start[j] + 1):subj_end[j]],
+                    KE[j], KA[j], NTR[j], bioav[j], KTR[j],
+                    n_dose_subj, dosetime_subj, doseamt_subj);
+      }else{
+        x_ipred[(subj_start[j] + 1):subj_end[j],] =
+          ode_ckrk(transit_1cmt_ode, y0, t0,
+                   time[(subj_start[j] + 1):subj_end[j]],
+                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
+                   n_dose_subj, dosetime_subj, doseamt_subj);
+      }
+
+      for(k in subj_start[j]:subj_end[j]){
+        dv_ipred[k] = fmax(0.000000001, x_ipred[k, 2] / VC[j]);
+      }
+
+    }
+    
+    ipred = dv_ipred[i_obs];
+
   }
   
 }
@@ -360,25 +281,25 @@ model{
   
   // Likelihood
   if(prior_only == 0){
-    target += reduce_sum(partial_sum_lupmf, seq_subj, grainsize,
-                         dv_obs, dv_obs_id, i_obs,
-                         amt, cmt, evid, time, 
-                         rate, ii, addl, ss, 
-                         subj_start, subj_end, subj_start_dose, subj_end_dose,
-                         KE, VC, KA, NTR, KTR,
-                         sigma_p,
-                         lloq, bloq,
-                         n_random, n_subjects, n_total,
-                         dosetime, doseamt,
-                         bioav, n_cmt, y0, solver);
-  } 
+    for(i in 1:n_obs){
+      real ipred_tmp = ipred[i];
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                            2*ipred_tmp*sigma_p_a);
+      if(bloq_obs[i] == 1){
+        target += log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
+                               normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp); 
+      }else{
+        target += normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
+                  normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }
+    }
+  }
 }
 generated quantities{
 
   real<lower = 0> TVKE = TVCL/TVVC;
   real<lower = 0> TVKTR = (TVNTR + 1)/TVMTT;
-
-  real<lower = 0> sigma_sq_p = square(sigma_p);
 
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
@@ -414,7 +335,6 @@ generated quantities{
   real omega_ka_mtt;
   real omega_ntr_mtt;
 
-  vector[n_obs] ipred;
   vector[n_obs] pred;
   vector[n_obs] dv_ppc;
   vector[n_obs] log_lik;
@@ -428,8 +348,6 @@ generated quantities{
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
 
-    vector[n_total] dv_ipred;
-    array[n_total] vector[n_cmt] x_ipred;
     vector[n_total] dv_pred;
     array[n_total] vector[n_cmt] x_pred;
 
@@ -465,52 +383,27 @@ generated quantities{
       array[n_dose_subj] real doseamt_subj =
         doseamt[subj_start_dose[j]:subj_end_dose[j]];
 
-      x_ipred[subj_start[j],] = y0;
       x_pred[subj_start[j],] = y0;
 
       if(solver == 1){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] =
-          ode_rk45(transit_1cmt_ode, y0, t0,
-                   time[(subj_start[j] + 1):subj_end[j]],
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-
         x_pred[(subj_start[j] + 1):subj_end[j],] =
           ode_rk45(transit_1cmt_ode, y0, t0,
                    time[(subj_start[j] + 1):subj_end[j]],
                    TVKE, TVKA, TVNTR, bioav[j], TVKTR,
                    n_dose_subj, dosetime_subj, doseamt_subj);
       }else if(solver == 2){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] =
-          ode_bdf(transit_1cmt_ode, y0, t0,
-                   time[(subj_start[j] + 1):subj_end[j]],
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-
         x_pred[(subj_start[j] + 1):subj_end[j],] =
           ode_bdf(transit_1cmt_ode, y0, t0,
                   time[(subj_start[j] + 1):subj_end[j]],
                   TVKE, TVKA, TVNTR, bioav[j], TVKTR,
                   n_dose_subj, dosetime_subj, doseamt_subj);
       }else if(solver == 3){
-        x_ipred[(subj_start[j] + 1):subj_end[j],] =
-          ode_adams(transit_1cmt_ode, y0, t0,
-                    time[(subj_start[j] + 1):subj_end[j]],
-                    KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                    n_dose_subj, dosetime_subj, doseamt_subj);
-
         x_pred[(subj_start[j] + 1):subj_end[j],] =
           ode_adams(transit_1cmt_ode, y0, t0,
                     time[(subj_start[j] + 1):subj_end[j]],
                     TVKE, TVKA, TVNTR, bioav[j], TVKTR,
                     n_dose_subj, dosetime_subj, doseamt_subj);
       }else{
-        x_ipred[(subj_start[j] + 1):subj_end[j],] =
-          ode_ckrk(transit_1cmt_ode, y0, t0,
-                   time[(subj_start[j] + 1):subj_end[j]],
-                   KE[j], KA[j], NTR[j], bioav[j], KTR[j],
-                   n_dose_subj, dosetime_subj, doseamt_subj);
-
         x_pred[(subj_start[j] + 1):subj_end[j],] =
           ode_ckrk(transit_1cmt_ode, y0, t0,
                    time[(subj_start[j] + 1):subj_end[j]],
@@ -519,14 +412,12 @@ generated quantities{
       }
 
       for(k in subj_start[j]:subj_end[j]){
-        dv_ipred[k] = fmax(0.000000001, x_ipred[k, 2] / VC[j]);
         dv_pred[k] = fmax(0.000000001, x_pred[k, 2] / TVVC);
       }
 
     }
 
     pred = dv_pred[i_obs];
-    ipred = dv_ipred[i_obs];
 
   }
 
@@ -535,7 +426,8 @@ generated quantities{
 
   for(i in 1:n_obs){
     real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
+    real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                          2*ipred_tmp*sigma_p_a);
     dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
     if(bloq_obs[i] == 1){
       // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
@@ -551,8 +443,9 @@ generated quantities{
     wres[i] = res[i]/sigma_tmp;
     iwres[i] = ires[i]/sigma_tmp;
   }
-
+  
 }
+
 
 
 
