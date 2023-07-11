@@ -2,7 +2,7 @@
 // IIV on CL, VC, Q, VP, KA, NTR, MTT (full covariance matrix)
 // n_transit is a positive real number, not fixed, and not necessarily an integer
 // General ODE solution using pure Stan code
-// proportional error - DV = IPRED*(1 + eps_p)
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Implements threading for within-chain parallelization
 // Deals with BLOQ values by the "CDF trick" (M4)
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
@@ -118,7 +118,7 @@ functions{
                         array[] int subj_start_dose, array[] int subj_end_dose,
                         vector CL, vector VC, vector Q, vector VP, vector KA, 
                         vector NTR, vector KTR,
-                        real sigma_p,
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a,
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
                         array[] real dosetime, array[] real doseamt,
@@ -192,17 +192,21 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      real sigma_tmp = ipred_slice[i]*sigma_p;
+      
+      real ipred_tmp = ipred_slice[i];
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                            2*ipred_tmp*sigma_p_a);
+      
       if(bloq_slice[i] == 1){
-        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
+        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_tmp, 
                                                             sigma_tmp),
-                                normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
+                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp); 
       }else{
-        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
+        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_tmp, sigma_tmp) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
       }
-    }                                         
+    }                                          
                               
     return ptarget;
                            
@@ -258,6 +262,9 @@ data{
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
   
   int n_dose;
   array[n_dose] real dosetime;
@@ -288,6 +295,8 @@ transformed data{
                                       scale_omega_q, scale_omega_vp,
                                       scale_omega_ka, scale_omega_ntr,
                                       scale_omega_mtt}; 
+                                      
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
   
   array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
   
@@ -310,7 +319,8 @@ parameters{
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -332,6 +342,15 @@ transformed parameters{
   vector[n_subjects] NTR;
   vector[n_subjects] MTT;
   vector[n_subjects] KTR;
+  
+  real<lower = 0> sigma_p = sigma[1];
+  real<lower = 0> sigma_a = sigma[2];
+  
+  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq_a = square(sigma_a);
+  
+  real cor_p_a;
+  real sigma_p_a;
 
   {
   
@@ -342,6 +361,9 @@ transformed parameters{
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
@@ -358,6 +380,9 @@ transformed parameters{
     NTR = col(theta, 6);
     MTT = col(theta, 7);
     KTR = (NTR + 1) ./ MTT;
+    
+    cor_p_a = R_Sigma[1, 2];
+    sigma_p_a = Sigma[1, 2];
   
   }
   
@@ -377,7 +402,8 @@ model{
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
-  sigma_p ~ normal(0, scale_sigma_p);
+  sigma ~ normal(0, scale_sigma);
+  L_Sigma ~ lkj_corr_cholesky(lkj_df_sigma);
   
   to_vector(Z) ~ std_normal();
   
@@ -389,7 +415,7 @@ model{
                          rate, ii, addl, ss, 
                          subj_start, subj_end, subj_start_dose, subj_end_dose,
                          CL, VC, Q, VP, KA, NTR, KTR,
-                         sigma_p,
+                         sigma_sq_p, sigma_sq_a, sigma_p_a, 
                          lloq, bloq,
                          n_random, n_subjects, n_total,
                          dosetime, doseamt,
@@ -399,8 +425,6 @@ model{
 generated quantities{
 
   real<lower = 0> TVKTR = (TVNTR + 1)/TVMTT;
-  
-  real<lower = 0> sigma_sq_p = square(sigma_p);
   
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
@@ -605,7 +629,8 @@ generated quantities{
 
   for(i in 1:n_obs){
     real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
+    real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                          2*ipred_tmp*sigma_p_a);
     dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
     if(bloq_obs[i] == 1){
       // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
@@ -621,9 +646,7 @@ generated quantities{
     wres[i] = res[i]/sigma_tmp;
     iwres[i] = ires[i]/sigma_tmp;
   }
-
+  
 }
-
-
 
 

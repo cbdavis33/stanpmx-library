@@ -17,17 +17,17 @@ functions{
   vector transit_2cmt_ode(real t, 
                           vector y,
                           real cl, real vc, real q, real vp, real ka, 
-                          real n_tr, real mtt, real f,
-                          int n_dose_subj,             // # of doses for this subject
-                          array[] real dosetime_subj,  // dosetimes for this subject
-                          array[] real doseamt_subj,   // dose amounts for this subject
+                          real n_tr, real f, real ktr, 
+                          int n_dose_subj,            // # of doses for this subject
+                          array[] real dosetime_subj, // dosetimes for this subject
+                          array[] real doseamt_subj,  // dose amounts for this subject
                           real t_1, real t_2){ 
     
-    real ktr = (n_tr + 1)/mtt;
-    // real k_inpt = f*pow(ktr, n_tr + 1)/exp(lgamma(n_tr + 1));
-    real log_k_inpt = log(f) + (n_tr + 1)*log(ktr) - lgamma(n_tr + 1);
-    real log_inpt;
-    array[n_dose_subj] real log_ipt = rep_array(negative_infinity(), n_dose_subj); 
+    // real ktr = (n_tr + 1)/mtt;
+    real k_inpt = f*pow(ktr, n_tr + 1)/exp(lgamma(n_tr + 1));
+    
+    real inpt = 0;
+    array[n_dose_subj] real ipt = rep_array(0.0, n_dose_subj);
     
     real ke = cl/vc;
     real k_cp = q/vc;
@@ -41,23 +41,20 @@ functions{
     for(i in 1:n_dose_subj){
       if(t >= dosetime_subj[i]){
         real delta_t = t - dosetime_subj[i];
-        // ipt[i] = doseamt_subj[i]*pow(delta_t, n_tr)*exp(-ktr*delta_t);
-        log_ipt[i] = log(doseamt_subj[i]) + n_tr*log(delta_t) - ktr*delta_t;
+        ipt[i] = doseamt_subj[i]*pow(delta_t, n_tr)*exp(-ktr*delta_t);
       }
     }
     
-    // inpt = sum(ipt);
-    // inpt = exp(log_sum_exp(log_ipt));
-    log_inpt = log_sum_exp(log_ipt);
+    inpt = sum(ipt);
     
-    dydt[1] = exp(log_k_inpt + log_inpt) - ka*y[1];
+    dydt[1] = k_inpt*inpt - ka*y[1];
     dydt[2] = slope;
     dydt[3] = k_cp*y[2] - k_pc*y[3];
     dydt[4] = y[2];                                // AUC
     dydt[5] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
     dydt[6] = x;                                   // C_max 
     dydt[7] = z;                                   // t_max 
-
+    
     return dydt;
     
   }
@@ -98,7 +95,7 @@ data{
   
   corr_matrix[7] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
-                     // cor_cl_vc, cor_cl_q, ... and then construct the 
+                     // cor_cl_vc, cor_cl_ka, ... and then construct the 
                      // correlation matrix in transformed data, but it's easy
                      // enough to do in R
   
@@ -126,7 +123,7 @@ transformed data{
                             omega_ntr, omega_mtt]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-
+  
   array[n_subjects] real bioav = rep_array(1.0, n_subjects); // Hardcoding, but could be data or a parameter in another situation
   
   vector[n_cmt] y0 = rep_vector(0.0, n_cmt);
@@ -168,6 +165,8 @@ generated quantities{
     vector[n_subjects] alpha;
     vector[n_subjects] beta;
     
+    vector[n_subjects] KTR;
+    
     for(i in 1:n_subjects){
       eta[, i] = multi_normal_cholesky_rng(rep_vector(0, n_random),
                                            diag_pre_multiply(omega, L));
@@ -181,6 +180,7 @@ generated quantities{
     KA = col(theta, 5);
     NTR = col(theta, 6);
     MTT = col(theta, 7);
+    KTR = (NTR + 1) ./ MTT;
     
     alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
                  sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
@@ -202,25 +202,25 @@ generated quantities{
       if(solver == 1){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_rk45(transit_2cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                   CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], MTT[j], bioav[j],
+                   CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], bioav[j], KTR[j],
                    n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }else if(solver == 2){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_bdf(transit_2cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                  CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], MTT[j], bioav[j],
+                  CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], bioav[j], KTR[j],
                   n_dose_subj, dosetime_subj, doseamt_subj,
-                   t_1, t_2);
+                  t_1, t_2);
       }else if(solver == 3){
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_adams(transit_2cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                    CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], MTT[j], bioav[j],
+                    CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], bioav[j], KTR[j],
                     n_dose_subj, dosetime_subj, doseamt_subj,
-                   t_1, t_2);
+                    t_1, t_2);
       }else{
         x_ipred[(subj_start[j] + 1):subj_end[j],] = 
           ode_ckrk(transit_2cmt_ode, y0, t0, time[(subj_start[j] + 1):subj_end[j]], 
-                   CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], MTT[j], bioav[j],
+                   CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], bioav[j], KTR[j],
                    n_dose_subj, dosetime_subj, doseamt_subj,
                    t_1, t_2);
       }
