@@ -2,17 +2,15 @@
 // IIV on CL, VC, Q, VP, KA, NTR, MTT (full covariance matrix)
 // n_transit is a positive real number, not fixed, and not necessarily an integer
 // General ODE solution using pure Stan code
-// proportional error - DV = IPRED*(1 + eps_p)
+// exponential error - DV = IPRED*exp(eps)
 // Implements threading for within-chain parallelization
-// Deals with BLOQ values by the "CDF trick" (M4)
+// Deals with BLOQ values by the M3 method (M3 and M4 are equivalent with this
+//   error model)
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
 // Drug is absorbed from the depot through the transit compartments into the 
 //   absorption compartment and into the central compartment
 //   (depot -> tr1 -> ... -> trn -> absorption -> central)
-// Since we have a normal distribution on the error, but the DV must be > 0, it
-//   truncates the likelihood below at 0
-// For PPC, it generates values from a normal that is truncated below at 0
 
 
 functions{
@@ -118,7 +116,7 @@ functions{
                         array[] int subj_start_dose, array[] int subj_end_dose,
                         vector CL, vector VC, vector Q, vector VP, vector KA, 
                         vector NTR, vector KTR,
-                        real sigma_p,
+                        real sigma,
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
                         array[] real dosetime, array[] real doseamt,
@@ -192,17 +190,12 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      real sigma_tmp = ipred_slice[i]*sigma_p;
       if(bloq_slice[i] == 1){
-        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
-                                                            sigma_tmp),
-                                normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
+        ptarget += lognormal_lcdf(lloq_slice[i] | log(ipred_slice[i]), sigma);
       }else{
-        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
+        ptarget += lognormal_lpdf(dv_obs_slice[i] | log(ipred_slice[i]), sigma);
       }
-    }                                         
+    }                                    
                               
     return ptarget;
                            
@@ -257,7 +250,7 @@ data{
   
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
-  real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma;  // Prior Scale parameter for exponential error
   
   int n_dose;
   array[n_dose] real dosetime;
@@ -310,7 +303,7 @@ parameters{
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  real<lower = 0> sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -377,7 +370,7 @@ model{
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
-  sigma_p ~ normal(0, scale_sigma_p);
+  sigma ~ normal(0, scale_sigma);
   
   to_vector(Z) ~ std_normal();
   
@@ -389,7 +382,7 @@ model{
                          rate, ii, addl, ss, 
                          subj_start, subj_end, subj_start_dose, subj_end_dose,
                          CL, VC, Q, VP, KA, NTR, KTR,
-                         sigma_p,
+                         sigma,
                          lloq, bloq,
                          n_random, n_subjects, n_total,
                          dosetime, doseamt,
@@ -400,7 +393,7 @@ generated quantities{
 
   real<lower = 0> TVKTR = (TVNTR + 1)/TVMTT;
   
-  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq = square(sigma);
   
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
@@ -600,28 +593,21 @@ generated quantities{
 
   }
 
-  res = dv_obs - pred;
-  ires = dv_obs - ipred;
+  res = log(dv_obs) - log(pred);
+  ires = log(dv_obs) - log(ipred);
 
   for(i in 1:n_obs){
-    real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
-    dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+    real log_ipred_tmp = log(ipred[i]);
+    dv_ppc[i] = lognormal_rng(log_ipred_tmp, sigma);
     if(bloq_obs[i] == 1){
-      // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
-      //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
-      //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
-                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      log_lik[i] = lognormal_lcdf(lloq_obs[i] | log_ipred_tmp, sigma);
     }else{
-      log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      log_lik[i] = lognormal_lpdf(dv_obs[i] | log_ipred_tmp, sigma);
     }
-    wres[i] = res[i]/sigma_tmp;
-    iwres[i] = ires[i]/sigma_tmp;
+    wres[i] = res[i]/sigma;
+    iwres[i] = ires[i]/sigma;
   }
-
+  
 }
 
 
