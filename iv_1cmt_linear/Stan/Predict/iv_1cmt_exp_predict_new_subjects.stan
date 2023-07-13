@@ -4,7 +4,6 @@
 // exponential error - DV = IPRED*exp(eps)
 // General ODE solution using Torsten to get out individual estimates of AUC. To
 //   get Cmax and Tmax, make sure you simulate at the end of the infusion
-// Predictions are generated from a normal that is truncated below at 0
 
 functions{
   

@@ -1,25 +1,43 @@
 // First Order Absorption (oral/subcutaneous)
-// One-compartment PK Model
+// Two-compartment PK Model
 // Zero-order distributive delay (like an infusion into the gut) to bring about 
 //   a delayed absorption
-// IIV on CL, VC, KA, DUR (full covariance matrix)
-// exponential error - DV = IPRED*exp(eps)
+// IIV on CL, VC, Q, VP, KA, DUR (full covariance matrix)
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
+// Observations are generated from a normal that is truncated below at 0
+// Since we have a normal distribution on the error, but the DV must be > 0, it
+//   generates values from a normal that is truncated below at 0
 
 functions{
   
-  vector depot_1cmt_ode(real t, vector y, array[] real params, 
+  real normal_lb_rng(real mu, real sigma, real lb){
+    
+    real p_lb = normal_cdf(lb | mu, sigma);
+    real u = uniform_rng(p_lb, 1);
+    real y = mu + sigma * inv_Phi(u);
+    return y;
+
+  }
+  
+  vector depot_2cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
     
     real cl = params[1];
     real vc = params[2];
-    real ka = params[3];
-    real ke = cl/vc;
+    real q = params[3];
+    real vp = params[4];
+    real ka = params[5];
     
-    vector[2] dydt;
+    real ke = cl/vc;
+    real k_cp = q/vc;
+    real k_pc = q/vp;
+    
+    vector[3] dydt;
 
-    dydt[1] = -ka*y[1];           // depot
-    dydt[2] = ka*y[1] - ke*y[2];  // central
+    dydt[1] = -ka*y[1];                                // depot
+    dydt[2] = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3];  // central
+    dydt[3] = k_cp*y[2] - k_pc*y[3];                   // peripheral
     
     return dydt;
   }
@@ -43,33 +61,47 @@ data{
   
   real<lower = 0> TVCL;
   real<lower = 0> TVVC;
+  real<lower = 0> TVQ;
+  real<lower = 0> TVVP;
   real<lower = 0> TVKA;
   real<lower = 0> TVDUR;
   
   real<lower = 0> omega_cl;
   real<lower = 0> omega_vc;
+  real<lower = 0> omega_q;
+  real<lower = 0> omega_vp;
   real<lower = 0> omega_ka;
   real<lower = 0> omega_dur;
   
-  corr_matrix[4] R;  // Correlation matrix before transforming to Omega.
+  corr_matrix[6] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
                      // cor_cl_vc, cor_cl_ka, ... and then construct the 
                      // correlation matrix in transformed data, but it's easy
                      // enough to do in R
   
-  real<lower = 0> sigma;
+  real<lower = 0> sigma_p;
+  real<lower = 0> sigma_a;
+  real<lower = -1, upper = 1> cor_p_a;
   
   int<lower = 1, upper = 3> solver; // 1 = analytical, 2 = matrix exponential, 3 = ODE
   
 }
 transformed data{
   
-  int n_random = 4;
-  int n_cmt = 2;
+  int n_random = 6;
+  int n_cmt = 3;
 
-  vector[n_random] omega = [omega_cl, omega_vc, omega_ka, omega_dur]';
+  vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
+                            omega_dur]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
+
+  vector[2] sigma = [sigma_p, sigma_a]';
+  matrix[2, 2] R_Sigma = rep_matrix(1, 2, 2);
+  R_Sigma[1, 2] = cor_p_a;
+  R_Sigma[2, 1] = cor_p_a;
+  
+  matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding, but could be data or a parameter in another situation
@@ -85,13 +117,15 @@ generated quantities{
   
   vector[n_subjects] CL;
   vector[n_subjects] VC;
+  vector[n_subjects] Q;
+  vector[n_subjects] VP;
   vector[n_subjects] KA;
   vector[n_subjects] DUR;
-  vector[n_subjects] KE;
   
   {
   
-    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVKA, TVDUR});
+    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVQ, TVVP, TVKA,
+                                                 TVDUR});
     
     matrix[n_random, n_subjects] eta;   
     matrix[n_subjects, n_random] theta; 
@@ -106,9 +140,10 @@ generated quantities{
 
     CL = col(theta, 1);
     VC = col(theta, 2);
-    KA = col(theta, 3);
-    DUR = col(theta, 4);
-    KE = CL ./ VC;
+    Q = col(theta, 3);
+    VP = col(theta, 4);
+    KA = col(theta, 5);
+    DUR = col(theta, 6);
     
     for(j in 1:n_subjects){
       
@@ -117,7 +152,7 @@ generated quantities{
       
       if(solver == 1){
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+          pmx_solve_twocpt(time[subj_start[j]:subj_end[j]],
                            amt[subj_start[j]:subj_end[j]],
                            rate,
                            ii[subj_start[j]:subj_end[j]],
@@ -125,7 +160,7 @@ generated quantities{
                            cmt[subj_start[j]:subj_end[j]],
                            addl[subj_start[j]:subj_end[j]],
                            ss[subj_start[j]:subj_end[j]],
-                           {CL[j], VC[j], KA[j]})';
+                           {CL[j], Q[j], VC[j], VP[j], KA[j]})';
                            
       }else if(solver == 2){
         
@@ -133,7 +168,10 @@ generated quantities{
   
         K[1, 1] = -KA[j];
         K[2, 1] = KA[j];
-        K[2, 2] = -CL[j]/VC[j];
+        K[2, 2] = -((CL[j] + Q[j])/VC[j]);
+        K[2, 3] = Q[j]/VP[j];
+        K[3, 2] = Q[j]/VC[j];
+        K[3, 3] = -Q[j]/VP[j];
         
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -149,7 +187,7 @@ generated quantities{
       }else{
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ode,
+          pmx_solve_rk45(depot_2cmt_ode,
                          n_cmt,
                          time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
@@ -159,7 +197,8 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], KA[j]}, bioav, tlag)';
+                         {CL[j], VC[j], Q[j], VP[j], KA[j]}, 
+                         bioav, tlag)';
                          
       }
 
@@ -172,10 +211,13 @@ generated quantities{
       if(ipred[i] == 0){
          dv[i] = 0;
       }else{
-        dv[i] = lognormal_rng(log(ipred[i]), sigma);
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] + 
+                              2*ipred_tmp*Sigma[2, 1]);
+        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+        
       }
     }
   }
 }
-
 
