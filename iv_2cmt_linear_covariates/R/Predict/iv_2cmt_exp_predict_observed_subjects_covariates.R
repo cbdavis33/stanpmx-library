@@ -3,6 +3,7 @@ cat("\014")
 
 library(trelliscopejs)
 library(cmdstanr)
+library(mrgsolve)
 library(tidybayes)
 library(posterior)
 library(tidyverse)

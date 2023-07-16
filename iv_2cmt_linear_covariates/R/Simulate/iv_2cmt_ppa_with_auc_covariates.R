@@ -5,6 +5,7 @@ library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
+library(patchwork)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -30,7 +31,7 @@ R <- diag(rep(1, times = 4))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0
+sigma_a <- 0.5
 
 cor_p_a <- 0
 
@@ -161,8 +162,8 @@ params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP",
                                      "auc_t1_t2", 
                                      "t_half_alpha", "t_half_terminal")) %>% 
   spread_draws(CL[ID], VC[ID], Q[ID], VP[ID],
-               auc_t1_t2[i], 
-               t_half_alpha[i], t_half_terminal[i]) %>% 
+               auc_t1_t2[ID], 
+               t_half_alpha[ID], t_half_terminal[ID]) %>% 
   inner_join(nonmem_data_simulate %>% 
                distinct(ID, SEXF, AGE, RACE, RACE_ASIAN, WT, EGFR),
              by = "ID") %>% 
@@ -239,9 +240,9 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
 
 data %>%
   select(-IPRED) %>%
-  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.csv", na = ".")
-  # write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_covariates.csv", na = ".")
+  # write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.csv", na = ".")
+  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_covariates.csv", na = ".")
 
 params_ind %>%
-  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_params_ind_covariates.csv")
-  # write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_params_ind_covariates.csv")
+  # write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_params_ind_covariates.csv")
+  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_params_ind_covariates.csv")

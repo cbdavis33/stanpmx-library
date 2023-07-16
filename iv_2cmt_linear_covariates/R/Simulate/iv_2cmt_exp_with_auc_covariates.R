@@ -5,6 +5,7 @@ library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
+library(patchwork)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -156,8 +157,8 @@ params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP",
                                      "auc_t1_t2", 
                                      "t_half_alpha", "t_half_terminal")) %>% 
   spread_draws(CL[ID], VC[ID], Q[ID], VP[ID],
-               auc_t1_t2[i], 
-               t_half_alpha[i], t_half_terminal[i]) %>% 
+               auc_t1_t2[ID], 
+               t_half_alpha[ID], t_half_terminal[ID]) %>% 
   inner_join(nonmem_data_simulate %>% 
                distinct(ID, SEXF, AGE, RACE, RACE_ASIAN, WT, EGFR),
              by = "ID") %>% 

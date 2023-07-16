@@ -5,6 +5,7 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
+library(mrgsolve)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")

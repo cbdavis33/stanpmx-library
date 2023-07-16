@@ -1,6 +1,7 @@
 rm(list = ls())
 cat("\014")
 
+library(mrgsolve)
 library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)

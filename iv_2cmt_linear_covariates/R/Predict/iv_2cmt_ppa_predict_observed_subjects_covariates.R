@@ -5,6 +5,7 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
+library(mrgsolve)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -147,27 +148,27 @@ post_preds_summary <- preds_df %>%
             by = c("ID", "time")) %>% 
   select(ID, time, everything(), -i)
 
-ggplot(post_preds_summary, aes(x = time, group = ID)) +
-  geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
-              fill = "blue", alpha = 0.25, show.legend = FALSE) +
-  geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
-              fill = "blue", alpha = 0.5, show.legend = FALSE) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = pred), linetype = 2, size = 1.05) +
-  geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
-             color = "red") +
-  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                     trans = "log10",
-                     limits = c(NA, NA)) +
-  scale_x_continuous(name = "Time (d)",
-                     breaks = seq(0, max(nonmem_data$time), by = 14),
-                     labels = seq(0, max(nonmem_data$time), by = 14),
-                     limits = c(0, max(nonmem_data$time))) +
-  theme_bw() +
-  theme(axis.text = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 18, face = "bold"),
-        legend.position = "bottom") +
-  facet_trelliscope(~ ID, nrow = 2, ncol = 2, scales = "free")
+# ggplot(post_preds_summary, aes(x = time, group = ID)) +
+#   geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
+#               fill = "blue", alpha = 0.25, show.legend = FALSE) +
+#   geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
+#               fill = "blue", alpha = 0.5, show.legend = FALSE) +
+#   geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
+#   geom_line(aes(y = pred), linetype = 2, size = 1.05) +
+#   geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
+#              color = "red") +
+#   scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+#                      trans = "log10",
+#                      limits = c(NA, NA)) +
+#   scale_x_continuous(name = "Time (d)",
+#                      breaks = seq(0, max(nonmem_data$time), by = 14),
+#                      labels = seq(0, max(nonmem_data$time), by = 14),
+#                      limits = c(0, max(nonmem_data$time))) +
+#   theme_bw() +
+#   theme(axis.text = element_text(size = 14, face = "bold"),
+#         axis.title = element_text(size = 18, face = "bold"),
+#         legend.position = "bottom") +
+#   facet_trelliscope(~ ID, nrow = 2, ncol = 2, scales = "free")
 
 
 tmp <- ggplot(post_preds_summary, aes(x = time, group = ID)) +
