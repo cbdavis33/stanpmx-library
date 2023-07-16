@@ -11,8 +11,8 @@ library(posterior)
 library(tidyverse)
 
 nonmem_data <- read_csv(
-  "depot_1cmt_linear_covariates//Data/depot_1cmt_prop_covariates.csv",
-                        na = ".") %>% 
+  "iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -30,13 +30,12 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds(
-  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_covariates.rds")
+fit <- read_rds("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_covariates.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_subset(fit$metadata()$stan_variables, "theta"),
-                             str_c("omega_", c("cl", "vc", "ka")),
+                             str_c("omega_", c("cl", "vc", "q", "vp")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
                              "sigma_p")
 
@@ -72,20 +71,22 @@ summary %>%
   arrange(-rhat)
 
 # Density Plots and Traceplots
-mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVKA")),
+mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                       "theta_ka_cmppi", "theta_cl_egfr")),
+                       "theta_q_wt", "theta_vp_wt",
+                       "theta_vc_race_asian", "theta_cl_egfr")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_ka")),
+mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("sigma_p")),
            combo = c("dens_overlay", "trace"))
 
-mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVKA")))
+mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP")))
 mcmc_rank_hist(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                           "theta_ka_cmppi", "theta_cl_egfr")))
-mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka")))
+                           "theta_q_wt", "theta_vp_wt",
+                           "theta_vc_race_asian", "theta_cl_egfr")))
+mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp")))
 mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
@@ -168,7 +169,7 @@ for(i in 1:ggforce::n_pages(tmp)){
           scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                              limits = c(NA, NA),
                              trans = "identity") +
-          scale_x_continuous(name = "Time (h)",
+          scale_x_continuous(name = "Time (d)",
                              breaks = seq(0, max(nonmem_data$time), by = 14),
                              labels = seq(0, max(nonmem_data$time), by = 14),
                              limits = c(0, max(nonmem_data$time))) +
@@ -181,6 +182,7 @@ for(i in 1:ggforce::n_pages(tmp)){
                                        page = i, scales = "free"))
   
 }
+
 
 ## Look at residuals and epsilon shrinkage
 residuals <- draws_df %>%
@@ -311,7 +313,7 @@ iwres_mean %>%
   geom_point() +
   geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
   scale_y_continuous(name = "iwres") +
-  scale_x_continuous(name = "Time (h)",
+  scale_x_continuous(name = "Time (d)",
                      limits = c(NA, NA))
 
 iwres_mean %>% 
@@ -330,11 +332,12 @@ iwres_mean %>%
 #   scale_x_continuous(name = "Time (h)",
 #                      limits = c(NA, NA))
 
+
 ## Look at eta shrinkage and covariate analysis
 # We can look at individual posterior densities on top of the density of the 
 # population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], TVCL, TVVC, TVKA) %>%
+  gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], TVCL, TVVC, TVQ, TVVP) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
 
@@ -359,14 +362,13 @@ ggplot() +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
   theme(legend.position = "bottom") +
   scale_fill_manual(name = "Population Parameter",
-                    values = c("red", "blue", "green")) +
+                    values = c("red", "blue", "green", "orange")) +
   guides(color = "none") +
   ggtitle("Individual Parameter Posterior Densities") 
 
-
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", "KA"),
+plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP"),
                            pop_est, std_dev, ind_params, ...){
   
   dots <- list(...)
@@ -375,7 +377,8 @@ plot_shrinkage <- function(.variable = c("CL", "VC", "KA"),
   
   x_label <- case_when(.variable == "CL" ~ "Clearance (L/h)",
                        .variable == "VC" ~ "Central Compartment Volume (L)",
-                       .variable == "KA" ~ "Absorption Rate Constant (1/h)",
+                       .variable == "Q" ~ "Intercompartmental Clearance (L/h)",
+                       .variable == "VP" ~ "Peripheral Compartment Volume (L)",
                        .default = NA_character_ )
   
   p_1 <- ggplot() +
@@ -407,7 +410,7 @@ plot_shrinkage_multiple <- function(draw){
   data_shrinkage_by_draw %>% 
     filter(.draw == draw) %>% 
     pmap(plot_shrinkage) %>% 
-    wrap_plots()
+    wrap_plots(nrow = 1)
   
 }
 
@@ -419,7 +422,7 @@ plot_shrinkage_multiple <- function(draw){
     ungroup() %>% 
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
-                gather_draws(omega_cl, omega_vc, omega_ka) %>% 
+                gather_draws(omega_cl, omega_vc, omega_q, omega_vp) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -440,13 +443,13 @@ data_shrinkage_by_draw <- draws_for_shrinkage %>%
   mutate(.variable = str_remove(.variable, "TV")) %>%
   rename(pop_est = .value) %>%
   inner_join(draws_for_shrinkage %>%
-               gather_draws(omega_cl, omega_vc, omega_ka) %>%
+               gather_draws(omega_cl, omega_vc, omega_q, omega_vp) %>%
                mutate(.variable = str_remove(.variable, "omega_") %>%
                         toupper()) %>%
                rename(std_dev = .value),
              by = c(".draw", ".chain", ".iteration", ".variable")) %>%
   inner_join(draws_for_shrinkage %>%
-               gather_draws(CL[ID], VC[ID], KA[ID]) %>%
+               gather_draws(CL[ID], VC[ID], Q[ID], VP[ID]) %>%
                ungroup()  %>% 
                rename(ind_params = `.value`) %>%
                select(-ID) %>%
@@ -477,7 +480,7 @@ draws_df %>%
   ungroup() %>% 
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
-              gather_draws(omega_cl, omega_vc, omega_ka) %>% 
+              gather_draws(omega_cl, omega_vc, omega_q, omega_vp) %>% 
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
@@ -490,13 +493,13 @@ data_shrinkage_with_point_estimates <- draws_df %>%
   ungroup() %>% 
   mutate(.variable = str_remove(.variable, "TV")) %>% 
   inner_join(draws_df %>% 
-               gather_draws(omega_cl, omega_vc, omega_ka) %>% 
+               gather_draws(omega_cl, omega_vc, omega_q, omega_vp) %>% 
                summarize(std_dev = mean(.value)) %>% 
                mutate(.variable = str_remove(.variable, "omega_") %>% 
                         toupper()),
              by = ".variable") %>% 
   inner_join(draws_df %>%
-               gather_draws(CL[ID], VC[ID], KA[ID]) %>% 
+               gather_draws(CL[ID], VC[ID], Q[ID], VP[ID]) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                select(-ID) %>% 
@@ -507,6 +510,14 @@ pmap(data_shrinkage_with_point_estimates,
      plot_shrinkage) %>% 
   wrap_plots()
 
+# Individual point estimates (posterior mean)
+est_ind <- draws_df %>%
+  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID],
+               eta_cl[ID], eta_vc[ID], eta_q[ID], eta_vp[ID]) %>% 
+  mean_qi() %>% 
+  select(ID, CL, VC, Q, VP,
+         eta_cl, eta_vc, eta_q, eta_vp) %>% 
+  mutate(ID = factor(ID))
 
 ## Let's examine covariate effects. 
 # Based on posterior samples for the individuals (a la Monolix). This is a more 
@@ -518,16 +529,17 @@ draws_for_covariate_examination <- draws_df %>%
   gather_draws(`eta_.*`[ID], regex = TRUE) %>% 
   ungroup()  %>% 
   left_join(nonmem_data %>% 
-              distinct(ID, sexf, age, race, wt, cmppi, egfr), 
+              distinct(ID, sexf, age, race, race_asian, wt, egfr), 
             by = "ID") %>% 
   mutate(sex = factor(if_else(sexf == 0, "Male", "Female")),
-         cmppi = factor(cmppi),
+         race_asian = factor(race_asian),
          race = factor(race),
          .variable = factor(.variable, 
-                            levels = str_c("eta_", c("cl", "vc", "ka"))),
+                            levels = str_c("eta_", c("cl", "vc", "q", "vp"))),
          .variable = fct_recode(.variable, "eta[CL]" = "eta_cl",
                                 "eta[VC]" = "eta_vc",
-                                "eta[KA]" = "eta_ka"))
+                                "eta[Q]" = "eta_q",
+                                "eta[VP]" = "eta_vp",))
 
 (p_draws_sex <- draws_for_covariate_examination %>% 
     ggplot(aes(x = sex, y = .value)) +
@@ -558,14 +570,14 @@ draws_for_covariate_examination <- draws_df %>%
     stat_smooth(method = "loess", span = 0.9) +
     facet_wrap(~.variable, scales = "free", labeller = label_parsed))
 
-(p_draws_cmppi <- draws_for_covariate_examination %>% 
-    ggplot(aes(x = cmppi, y = .value)) +
+(p_draws_race_asian <- draws_for_covariate_examination %>% 
+    ggplot(aes(x = race_asian, y = .value)) +
     geom_boxplot() +
-    scale_x_discrete(name = "CMPPI") +
+    scale_x_discrete(name = "Asian") +
     scale_y_continuous(name = "Indiv. Effect") +
     theme_bw(18) +
     geom_hline(yintercept = 0, linetype = "dashed") +
-
+    
     facet_wrap(~.variable, scales = "free", labeller = label_parsed))
 
 (p_draws_race <- draws_for_covariate_examination %>% 
@@ -591,11 +603,11 @@ draws_for_covariate_examination <- draws_df %>%
 # Based on individual point estimates. This is not the best way to do it
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(CL[ID], VC[ID], KA[ID],
-               eta_cl[ID], eta_vc[ID], eta_ka[ID]) %>% 
+  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID],
+               eta_cl[ID], eta_vc[ID], eta_q[ID], eta_vp[ID]) %>% 
   mean_qi() %>% 
-  select(ID, CL, VC, KA,
-         eta_cl, eta_vc, eta_ka) %>% 
+  select(ID, CL, VC, Q, VP,
+         eta_cl, eta_vc, eta_q, eta_vp) %>% 
   mutate(ID = factor(ID))
 
 ## Standardized Random Effects (posterior mean)
@@ -610,13 +622,13 @@ eta_std <- est_ind %>%
   ungroup() %>% 
   mutate(parameter = toupper(parameter)) %>% 
   left_join(nonmem_data %>% 
-              distinct(ID, sexf, age, race, wt, cmppi, egfr) %>% 
+              distinct(ID, sexf, age, race, race_asian, wt, egfr) %>% 
               mutate(ID = factor(ID)), 
             by = "ID") %>% 
   mutate(sex = factor(if_else(sexf == 0, "Male", "Female")),
-         cmppi = factor(cmppi),
+         race_asian = factor(race_asian),
          race = factor(race),
-         parameter = factor(parameter, levels = c("CL", "VC", "KA")))
+         parameter = factor(parameter, levels = c("CL", "VC", "Q", "VP")))
 
 (p_point_sex <- eta_std %>% 
     ggplot(aes(x = sex, y = eta)) + 
@@ -648,10 +660,10 @@ eta_std <- est_ind %>%
     stat_smooth(method = "lm") +
     facet_wrap(~parameter, scales = "free"))
 
-(p_point_cmppi <- eta_std %>% 
-    ggplot(aes(x = cmppi, y = eta)) + 
+(p_point_race_asian <- eta_std %>% 
+    ggplot(aes(x = race_asian, y = eta)) + 
     geom_boxplot() +
-    scale_x_discrete(name = "CMPPI") +
+    scale_x_discrete(name = "Asian") +
     scale_y_continuous(name = "Indiv. Effect") +
     theme_bw(18) +
     geom_hline(yintercept = 0, linetype = "dashed") +
@@ -685,11 +697,11 @@ p_point_age /
 p_point_wt /
   p_draws_wt
 
+p_point_race_asian /
+  p_draws_race_asian
+
 p_point_race /
   p_draws_race
-
-p_point_cmppi / 
-  p_draws_cmppi
 
 p_point_egfr / 
   p_draws_egfr
@@ -706,7 +718,7 @@ p_point_egfr /
      ungroup()  %>% 
      mutate(ID = factor(ID)) %>% 
      left_join(nonmem_data %>% 
-                 distinct(ID, sexf, age, race, wt, cmppi, egfr) %>% 
+                 distinct(ID, sexf, age, race, race_asian, wt, egfr) %>% 
                  mutate(ID = factor(ID)), 
                by = "ID") %>% 
      ggplot(aes(x = eta_cl, y = eta_vc)) + 
@@ -714,5 +726,6 @@ p_point_egfr /
      theme_bw() + 
      geom_smooth(method = "loess") +
      ggtitle("Samples"))
+
 
 
