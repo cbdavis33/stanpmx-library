@@ -150,9 +150,9 @@ p_1 +
 
 data %>%
   select(-IPRED) %>% 
-  write_csv("iv_2cmt_linear/Data/iv_1cmt_exp.csv", na = ".")
+  write_csv("iv_1cmt_linear/Data/iv_1cmt_exp.csv", na = ".")
 
 params_ind %>%
-  write_csv("iv_2cmt_linear/Data/iv_1cmt_exp_params_ind.csv")
+  write_csv("iv_1cmt_linear/Data/iv_1cmt_exp_params_ind.csv")
 
 
