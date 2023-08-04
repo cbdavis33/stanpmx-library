@@ -10,8 +10,9 @@ library(patchwork)
 library(posterior)
 library(tidyverse)
 
-nonmem_data <- read_csv("transit_savic_2cmt_linear/Data/transit_savic_2cmt_prop.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_exp.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -29,14 +30,15 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("transit_savic_2cmt_linear/Stan/Fits/transit_savic_2cmt_prop.rds")
+fit <- read_rds(
+  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_exp.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "q", "vp", "ka", 
-                                               "ntr", "mtt")),
+                                               "mtt")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             "sigma_p")
+                             "sigma")
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -70,20 +72,18 @@ summary %>%
   arrange(-rhat)
 
 # Density Plots and Traceplots
-mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA", 
-                       "TVNTR", "TVMTT")),
+mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA", "TVMTT")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp",
-                       "omega_ka", "omega_ntr", "omega_mtt")),
+                       "omega_ka", "omega_mtt")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("sigma_p")),
+mcmc_combo(fit$draws(c("sigma")),
            combo = c("dens_overlay", "trace"))
 
-mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA", 
-                           "TVNTR", "TVMTT")))
+mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA", "TVMTT")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp",
-                           "omega_ka", "omega_ntr", "omega_mtt")))
-mcmc_rank_hist(fit$draws(c("sigma_p")))
+                           "omega_ka", "omega_mtt")))
+mcmc_rank_hist(fit$draws(c("sigma")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo()
@@ -331,8 +331,8 @@ iwres_mean %>%
 # We can look at individual posterior densities on top of the density of the 
 # population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], NTR[ID], MTT[ID], 
-               TVCL, TVVC, TVQ, TVVP, TVKA, TVNTR, TVMTT) %>%
+  gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], MTT[ID], 
+               TVCL, TVVC, TVQ, TVVP, TVKA, TVMTT) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
 
@@ -365,8 +365,7 @@ ggplot() +
 
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP", "KA",
-                                         "NTR", "MTT"),
+plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP", "KA", "MTT"),
                            pop_est, std_dev, ind_params, ...){
   
   dots <- list(...)
@@ -378,7 +377,6 @@ plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP", "KA",
                        .variable == "Q" ~ "Intercompartmental Clearance (L/h)",
                        .variable == "VP" ~ "Peripheral Compartment Volume (L)",
                        .variable == "KA" ~ "Absorption Rate Constant (1/h)",
-                       .variable == "NTR" ~ "# of Transit Compartments",
                        .variable == "MTT" ~ "Mean Transit Time (h)",
                        .default = NA_character_ )
   
@@ -424,7 +422,7 @@ plot_shrinkage_multiple <- function(draw){
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
                 gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
-                             omega_ntr, omega_mtt) %>% 
+                             omega_mtt) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -446,14 +444,14 @@ data_shrinkage_by_draw <- draws_for_shrinkage %>%
   rename(pop_est = .value) %>%
   inner_join(draws_for_shrinkage %>%
                gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
-                            omega_ntr, omega_mtt) %>%
+                            omega_mtt) %>%
                mutate(.variable = str_remove(.variable, "omega_") %>%
                         toupper()) %>%
                rename(std_dev = .value),
              by = c(".draw", ".chain", ".iteration", ".variable")) %>%
   inner_join(draws_for_shrinkage %>%
                gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], 
-                            NTR[ID], MTT[ID]) %>%
+                            MTT[ID]) %>%
                ungroup()  %>% 
                rename(ind_params = `.value`) %>%
                select(-ID) %>%
@@ -485,7 +483,7 @@ draws_df %>%
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
               gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
-                           omega_ntr, omega_mtt) %>% 
+                           omega_mtt) %>% 
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
@@ -499,14 +497,13 @@ data_shrinkage_with_point_estimates <- draws_df %>%
   mutate(.variable = str_remove(.variable, "TV")) %>% 
   inner_join(draws_df %>% 
                gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
-                            omega_ntr, omega_mtt) %>% 
+                            omega_mtt) %>% 
                summarize(std_dev = mean(.value)) %>% 
                mutate(.variable = str_remove(.variable, "omega_") %>% 
                         toupper()),
              by = ".variable") %>% 
   inner_join(draws_df %>%
-               gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], 
-                            NTR[ID], MTT[ID]) %>% 
+               gather_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], MTT[ID]) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                select(-ID) %>% 
@@ -520,12 +517,12 @@ pmap(data_shrinkage_with_point_estimates,
 
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], NTR[ID], MTT[ID],
+  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], MTT[ID],
                eta_cl[ID], eta_vc[ID], eta_q[ID], eta_vp[ID], eta_ka[ID], 
-               eta_ntr[ID], eta_mtt[ID]) %>% 
+               eta_mtt[ID]) %>% 
   mean_qi() %>% 
-  select(ID, CL, VC, Q, VP, KA, NTR, MTT,
-         eta_cl, eta_vc, eta_q, eta_vp, eta_ka, eta_ntr, eta_mtt) %>% 
+  select(ID, CL, VC, Q, VP, KA, MTT,
+         eta_cl, eta_vc, eta_q, eta_vp, eta_ka, eta_mtt) %>% 
   mutate(ID = factor(ID))
 
 ## Standardized Random Effects (posterior mean)

@@ -11,10 +11,12 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("transit_savic_2cmt_linear/Stan/Fits/transit_savic_2cmt_exp.rds")
+fit <- read_rds(
+  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_prop.rds")
 
-nonmem_data <- read_csv("transit_savic_2cmt_linear/Data/transit_savic_2cmt_exp.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_prop.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -43,22 +45,6 @@ subj_start <- new_data %>%
 
 subj_end <- c(subj_start[-1] - 1, n_time_new)  
 
-new_data_dose <- new_data %>% 
-  filter(evid == 1)
-
-n_dose <- new_data_dose %>% 
-  nrow()
-
-subj_start_dose <- new_data_dose %>% 
-  mutate(row_num = 1:n()) %>% 
-  group_by(ID) %>% 
-  slice_head(n = 1) %>%
-  ungroup() %>% 
-  select(row_num) %>% 
-  deframe()
-
-subj_end_dose <- c(subj_start_dose[-1] - 1, n_dose) 
-
 stan_data <- list(n_subjects = n_subjects,
                   n_subjects_new = n_subjects,
                   n_time_new = n_time_new,
@@ -72,16 +58,12 @@ stan_data <- list(n_subjects = n_subjects,
                   ss = new_data$ss,
                   subj_start = subj_start,
                   subj_end = subj_end,
-                  n_dose = n_dose,
-                  dosetime = new_data_dose$time,
-                  doseamt = new_data_dose$amt,
-                  subj_start_dose = subj_start_dose,
-                  subj_end_dose = subj_end_dose,
+                  n_transit = 6,
                   t_1 = 0,
                   t_2 = 24)
 
 model <- cmdstan_model(
-  "transit_savic_2cmt_linear/Stan/Predict/transit_savic_2cmt_exp_predict_new_subjects.stan")
+  "transit_fixed_ntr_2cmt_linear/Stan/Predict/transit_fixed_ntr_2cmt_prop_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,

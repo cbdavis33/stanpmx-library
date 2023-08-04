@@ -1,14 +1,16 @@
 rm(list = ls())
 cat("\014")
 
+library(trelliscopejs)
 library(cmdstanr)
 library(patchwork)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("transit_savic_2cmt_linear/Data/transit_savic_2cmt_exp.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_ppa.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -40,22 +42,6 @@ subj_start <- nonmem_data %>%
 
 subj_end <- c(subj_start[-1] - 1, n_total)
 
-nonmem_data_dose <- nonmem_data %>% 
-  filter(evid == 1)
-
-n_dose <- nonmem_data_dose %>% 
-  nrow()
-
-subj_start_dose <- nonmem_data_dose %>% 
-  mutate(row_num = 1:n()) %>% 
-  group_by(ID) %>% 
-  slice_head(n = 1) %>%
-  ungroup() %>% 
-  select(row_num) %>% 
-  deframe()
-
-subj_end_dose <- c(subj_start_dose[-1] - 1, n_dose) 
-
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
                   n_obs = n_obs,
@@ -74,71 +60,65 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 1,
+                  location_tvcl = 0.75,
                   location_tvvc = 18,
                   location_tvq = 3,
-                  location_tvvp = 45,
-                  location_tvka = 1.8,
-                  location_tvntr = 5,
+                  location_tvvp = 35,
+                  location_tvka = 0.8,
                   location_tvmtt = 1,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_tvq = 1,
                   scale_tvvp = 1,
                   scale_tvka = 1,
-                  scale_tvntr = 1,
                   scale_tvmtt = 1,
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
                   scale_omega_q = 0.4,
                   scale_omega_vp = 0.4,
                   scale_omega_ka = 0.4,
-                  scale_omega_ntr = 0.4,
                   scale_omega_mtt = 0.4,
                   lkj_df_omega = 2,
-                  scale_sigma = 0.5,
-                  n_dose = n_dose,
-                  dosetime = nonmem_data_dose$time,
-                  doseamt = nonmem_data_dose$amt,
-                  subj_start_dose = subj_start_dose,
-                  subj_end_dose = subj_end_dose,
+                  scale_sigma_p = 0.5,
+                  scale_sigma_a = 0.5,
+                  lkj_df_sigma = 2,
                   prior_only = 1,
-                  solver = 4)
+                  n_transit = 6)
 
 model <- cmdstan_model(
-  "transit_savic_2cmt_linear/Stan/Fit/transit_savic_2cmt_exp.stan",
+  "transit_fixed_ntr_2cmt_linear/Stan/Fit/transit_fixed_ntr_2cmt_ppa.stan",
   cpp_options = list(stan_threads = TRUE))
 
 priors <- model$sample(data = stan_data,
-                       seed = 235813,
+                       seed = 1928374,
                        chains = 4,
                        parallel_chains = 4,
-                       threads_per_chain = 24,
+                       threads_per_chain = parallel::detectCores()/4,
                        iter_warmup = 500,
                        iter_sampling = 1000,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(0.4), 0.3),
-                                              TVVC = rlnorm(1, log(15), 0.3),
-                                              TVQ = rlnorm(1, log(6), 0.3),
-                                              TVVP = rlnorm(1, log(35), 0.3),
-                                              TVKA = rlnorm(1, log(4), 0.3),
-                                              TVNTR = rlnorm(1, log(5), 0.3),
+                       init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
+                                              TVVC = rlnorm(1, log(18), 0.3),
+                                              TVQ = rlnorm(1, log(2), 0.3),
+                                              TVVP = rlnorm(1, log(40), 0.3),
+                                              TVKA = rlnorm(1, log(1), 0.3),
                                               TVMTT = rlnorm(1, log(1), 0.3),
-                                              omega = rlnorm(7, log(0.3), 0.3),
-                                              sigma = rlnorm(1, log(0.2), 0.3)))
+                                              omega = rlnorm(6, log(0.3), 0.3),
+                                              sigma_p = rlnorm(1, log(0.2), 0.3)))
 
 
-fit <- read_rds("transit_savic_2cmt_linear/Stan/Fits/transit_savic_2cmt_exp.rds")
+fit <- read_rds(
+  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_ppa.rds")
+
 draws_df <- fit$draws(format = "draws_df")
 
-parameters_to_summarize <- c(str_c("TV", c("CL", "VC", "Q", "VP", "KA",
-                                           "NTR", "MTT")),
+parameters_to_summarize <- c(str_c("TV", c("CL", "VC", "Q", "VP", "KA", "MTT")),
                              str_c("omega_", c("cl", "vc", "q", "vp", "ka",
-                                               "ntr", "mtt")),
+                                               "mtt")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             "sigma")
+                             str_c("sigma_", c("p", "a")))
 
 draws_all_df <- priors$draws(format = "draws_df") %>% 
   mutate(target = "prior") %>% 
@@ -146,13 +126,13 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
   bind_rows(draws_df %>% 
               mutate(target = "posterior")) %>% 
   select(all_of(parameters_to_summarize), target) %>% 
-  pivot_longer(cols = TVCL:sigma, names_to = "variable", values_to = "value")
+  pivot_longer(cols = TVCL:sigma_a, names_to = "variable", values_to = "value")
 
 (target_comparison_tv <- draws_all_df %>% 
     filter(str_detect(variable, "TV")) %>%
     mutate(variable = factor(variable, 
                              levels = str_c("TV", c("CL", "VC", "Q", "VP", "KA", 
-                                                    "NTR", "MTT")))) %>% 
+                                                    "MTT")))) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() +
@@ -166,13 +146,12 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     filter(str_detect(variable, "omega_")) %>% 
     mutate(variable = factor(variable, 
                              levels = str_c("omega_", c("cl", "vc", "q", "vp", 
-                                                        "ka", "ntr", "mtt"))),
+                                                        "ka", "mtt"))),
            variable = fct_recode(variable, "omega[CL]" = "omega_cl",
                                  "omega[VC]" = "omega_vc",
                                  "omega[Q]" = "omega_q",
                                  "omega[VP]" = "omega_vp",
                                  "omega[KA]" = "omega_ka",
-                                 "omega[NTR]" = "omega_ntr",
                                  "omega[MTT]" = "omega_mtt")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
@@ -183,39 +162,38 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_cor <- draws_all_df %>% 
-    filter(str_detect(variable, "cor_")) %>% 
+    filter(variable %in% c("cor_cl_vc", "cor_cl_q", "cor_cl_vp", 
+                           "cor_cl_ka", "cor_cl_mtt",
+                           "cor_vc_q", "cor_vc_vp", "cor_vc_ka", 
+                           "cor_vc_mtt",
+                           "cor_q_vp", "cor_q_ka", "cor_q_mtt",
+                           "cor_vp_ka", "cor_vp_mtt",
+                           "cor_ka_mtt")) %>% 
     mutate(variable = 
              factor(variable, 
                     levels = c("cor_cl_vc", "cor_cl_q", "cor_cl_vp", 
-                               "cor_cl_ka", "cor_cl_ntr", "cor_cl_mtt",
+                               "cor_cl_ka", "cor_cl_mtt",
                                "cor_vc_q", "cor_vc_vp", "cor_vc_ka", 
-                               "cor_vc_ntr", "cor_vc_mtt",
-                               "cor_q_vp", "cor_q_ka", "cor_q_ntr", "cor_q_mtt",
-                               "cor_vp_ka", "cor_vp_ntr", "cor_vp_mtt",
-                               "cor_ka_ntr", "cor_ka_mtt",
-                               "cor_ntr_mtt")),
+                               "cor_vc_mtt",
+                               "cor_q_vp", "cor_q_ka", "cor_q_mtt",
+                               "cor_vp_ka", "cor_vp_mtt",
+                               "cor_ka_mtt")),
            variable = fct_recode(variable, 
                                  "rho[paste(CL, ', ', VC)]" = "cor_cl_vc",
                                  "rho[paste(CL, ', ', Q)]" = "cor_cl_q",
                                  "rho[paste(CL, ', ', VP)]" = "cor_cl_vp",
                                  "rho[paste(CL, ', ', KA)]" = "cor_cl_ka",
-                                 "rho[paste(CL, ', ', NTR)]" = "cor_cl_ntr",
                                  "rho[paste(CL, ', ', MTT)]" = "cor_cl_mtt",
                                  "rho[paste(VC, ', ', Q)]" = "cor_vc_q",
                                  "rho[paste(VC, ', ', VP)]" = "cor_vc_vp",
                                  "rho[paste(VC, ', ', KA)]" = "cor_vc_ka",
-                                 "rho[paste(VC, ', ', NTR)]" = "cor_vc_ntr",
                                  "rho[paste(VC, ', ', MTT)]" = "cor_vc_mtt",
                                  "rho[paste(Q, ', ', VP)]" = "cor_q_vp",
                                  "rho[paste(Q, ', ', KA)]" = "cor_q_ka",
-                                 "rho[paste(Q, ', ', NTR)]" = "cor_q_ntr",
                                  "rho[paste(Q, ', ', MTT)]" = "cor_q_mtt",
                                  "rho[paste(VP, ', ', KA)]" = "cor_vp_ka",
-                                 "rho[paste(VP, ', ', NTR)]" = "cor_vp_ntr",
                                  "rho[paste(VP, ', ', MTT)]" = "cor_vp_mtt",
-                                 "rho[paste(KA, ', ', NTR)]" = "cor_ka_ntr",
-                                 "rho[paste(KA, ', ', MTT)]" = "cor_ka_mtt",
-                                 "rho[paste(NTR, ', ', MTT)]" = "cor_ntr_mtt")) %>% 
+                                 "rho[paste(KA, ', ', MTT)]" = "cor_ka_mtt")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -224,12 +202,13 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     theme(legend.position = "bottom") +
     facet_wrap(~ variable, scales = "free", nrow = 3, labeller = label_parsed))
 
-
-(target_comparison_sigma <- draws_all_df %>% 
-    filter(str_detect(variable, "sigma")) %>% 
+(target_comparison_error <- draws_all_df %>% 
+    filter(variable %in% c("sigma_p", "sigma_a", "cor_p_a")) %>% 
     mutate(variable = factor(variable, 
-                             levels = "sigma"),
-           variable = fct_recode(variable, "sigma" = "sigma")) %>% 
+                             levels = c("sigma_p", "sigma_a", "cor_p_a")),
+           variable = fct_recode(variable, "sigma[prop]" = "sigma_p",
+                                 "sigma[add]" = "sigma_a",
+                                 "rho[paste(p, ', ', a)]" = "cor_p_a")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -249,7 +228,7 @@ layout <- c(
 target_comparison_tv /
   target_comparison_omega /
   target_comparison_cor /
-  target_comparison_sigma +
+  target_comparison_error +
   plot_layout(guides = 'collect', 
               design = layout) &
   theme(legend.position = "bottom")

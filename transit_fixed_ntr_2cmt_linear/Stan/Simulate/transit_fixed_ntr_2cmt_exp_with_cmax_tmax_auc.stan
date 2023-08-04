@@ -195,11 +195,11 @@ generated quantities{
         x_ipred[subj_start[j]:subj_end[j], (n_transit + 3)] ./ VC[j];
         
       auc[subj_start[j]:subj_end[j]] = 
-                                x_ipred[subj_start[j]:subj_end[j], 4] ./ VC[j];
+                  x_ipred[subj_start[j]:subj_end[j], (n_transit + 5)] ./ VC[j];
       
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
+      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 6)]) / VC[j];
+      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 7)]);
+      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 8)]) - t_1;
       t_half_alpha[j] = log(2)/alpha[j];
       t_half_terminal[j] = log(2)/beta[j];
       

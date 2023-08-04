@@ -117,82 +117,31 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  n_transit = 6,
-                  solver = 1)
+                  n_transit = 6)
 
 model <- cmdstan_model(
-  "transit_fixed_ntr_2cmt_linear/Stan/Fit/transit_fixed_ntr_2cmt_prop_all_solvers.stan",
+  "transit_fixed_ntr_2cmt_linear/Stan/Fit/transit_fixed_ntr_2cmt_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit_mat_exp <- model$sample(
-  data = stan_data,
-  seed = 1928374,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 10,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(6, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+fit <- model$sample(data = stan_data,
+                    seed = 1928374,
+                    chains = 4,
+                    parallel_chains = 4,
+                    threads_per_chain = parallel::detectCores()/4,
+                    iter_warmup = 500,
+                    iter_sampling = 1000,
+                    adapt_delta = 0.8,
+                    refresh = 10,
+                    max_treedepth = 10,
+                    init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
+                                           TVVC = rlnorm(1, log(18), 0.3),
+                                           TVQ = rlnorm(1, log(2), 0.3),
+                                           TVVP = rlnorm(1, log(40), 0.3),
+                                           TVKA = rlnorm(1, log(1), 0.3),
+                                           TVMTT = rlnorm(1, log(1), 0.3),
+                                           omega = rlnorm(6, log(0.3), 0.3),
+                                           sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit_mat_exp$save_object(
-  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_prop_mat_exp.rds")
-
-
-stan_data$solver <- 2
-fit_rk45 <- model$sample(
-  data = stan_data,
-  seed = 1928374,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 5,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(6, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_rk45$save_object(
-  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_prop_rk45.rds")
-
-stan_data$solver <- 3
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 1928374,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 5,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(6, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf$save_object(
-  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_prop_bdf.rds")
+fit$save_object(
+  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_prop.rds")
 

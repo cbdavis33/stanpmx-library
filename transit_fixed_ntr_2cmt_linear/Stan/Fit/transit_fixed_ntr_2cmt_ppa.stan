@@ -3,9 +3,8 @@
 // n_transit is fixed to a positive integer that can be defined as data
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
-// proportional error - DV = IPRED*(1 + eps_p)
-// Either of matrix-exponential or general ODE solution using Torsten 
-//   (user's choice)
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
+// Matrix-exponential solution using Torsten 
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
 // Since we have a normal distribution on the error, but the DV must be > 0, it
@@ -107,12 +106,11 @@ functions{
                         array[] int subj_start, array[] int subj_end, 
                         vector CL, vector VC, vector Q, vector VP, vector KA,
                         vector KTR,
-                        real sigma_p, 
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a,
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, int n_cmt, 
-                        int n_transit, int solver,
-                        data array[,] real x_r, data array[,] int x_i){
+                        int n_transit){
                            
     real ptarget = 0;
                               
@@ -136,67 +134,31 @@ functions{
     for(n in 1:N){            // loop over subjects in this slice
     
       int j = n + start - 1; // j is the ID of the current subject
+        
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
       
-      if(solver == 1){
-        
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-      
-        for(i in 1:(n_transit + 1)){
-          K[i, i] = -KTR[j];
-          K[(i + 1), i] = KTR[j];
-        }
-        
-        K[(n_transit + 2), (n_transit + 2)] = -KA[j];
-        K[(n_transit + 3), (n_transit + 2)] = KA[j];
-        K[(n_transit + 3), (n_transit + 3)] = -(CL[j]/VC[j] + Q[j]/VC[j]);
-        K[(n_transit + 3), (n_transit + 4)] = Q[j]/VP[j];
-        K[(n_transit + 4), (n_transit + 3)] = Q[j]/VC[j];
-        K[(n_transit + 4), (n_transit + 4)] = -Q[j]/VP[j];
-
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, bioav, tlag)';
-          
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(transit_fixed_2cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], Q[j], VP[j], KA[j], KTR[j]}, 
-                         bioav, tlag, x_r, x_i)';
-                           
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(transit_fixed_2cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], Q[j], VP[j], KA[j], KTR[j]}, 
-                         bioav, tlag, x_r, x_i)';
-                         
+      for(i in 1:(n_transit + 1)){
+        K[i, i] = -KTR[j];
+        K[(i + 1), i] = KTR[j];
       }
+        
+      K[(n_transit + 2), (n_transit + 2)] = -KA[j];
+      K[(n_transit + 3), (n_transit + 2)] = KA[j];
+      K[(n_transit + 3), (n_transit + 3)] = -(CL[j]/VC[j] + Q[j]/VC[j]);
+      K[(n_transit + 3), (n_transit + 4)] = Q[j]/VP[j];
+      K[(n_transit + 4), (n_transit + 3)] = Q[j]/VC[j];
+      K[(n_transit + 4), (n_transit + 4)] = -Q[j]/VP[j];
+
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K, bioav, tlag)';
                       
       dv_ipred[subj_start[j]:subj_end[j]] = 
         x_ipred[subj_start[j]:subj_end[j], (n_transit + 3)] ./ VC[j];
@@ -206,17 +168,21 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      real sigma_tmp = ipred_slice[i]*sigma_p;
+      
+      real ipred_tmp = ipred_slice[i];
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                            2*ipred_tmp*sigma_p_a);
+      
       if(bloq_slice[i] == 1){
-        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
+        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_tmp, 
                                                             sigma_tmp),
-                                normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
+                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp); 
       }else{
-        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
+        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_tmp, sigma_tmp) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
       }
-    }                                         
+    }                                          
                               
     return ptarget;
                            
@@ -268,12 +234,13 @@ data{
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
   
   int<lower = 1> n_transit;
-  
-  int<lower = 1, upper = 4> solver; // 1 = matrix exponential, 2 = rk45, 3 = bdf
  
 }
 transformed data{ 
@@ -292,6 +259,8 @@ transformed data{
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_q, scale_omega_vp,
                                       scale_omega_ka, scale_omega_mtt}; 
+                                      
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a};   
   
   array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
   
@@ -316,7 +285,8 @@ parameters{
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -336,6 +306,15 @@ transformed parameters{
   vector[n_subjects] KA;
   vector[n_subjects] MTT;
   vector[n_subjects] KTR;
+  
+  real<lower = 0> sigma_p = sigma[1];
+  real<lower = 0> sigma_a = sigma[2];
+  
+  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq_a = square(sigma_a);
+  
+  real cor_p_a;
+  real sigma_p_a;
 
   {
   
@@ -346,6 +325,9 @@ transformed parameters{
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
@@ -360,15 +342,11 @@ transformed parameters{
     KA = col(theta, 5);
     MTT = col(theta, 6);
     KTR = (n_transit + 1) ./ MTT;
+    
+    cor_p_a = R_Sigma[1, 2];
+    sigma_p_a = Sigma[1, 2];
   
   }
-  // print("CL = ", CL);
-  // print("VC = ", VC);
-  // print("Q = ", Q);
-  // print("VP = ", VP);
-  // print("KA = ", KA);
-  // print("MTT = ", MTT);
-  // print("KTR = ", KTR);
 }
 model{ 
   
@@ -384,7 +362,8 @@ model{
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
-  sigma_p ~ normal(0, scale_sigma_p);
+  sigma ~ normal(0, scale_sigma);
+  L_Sigma ~ lkj_corr_cholesky(lkj_df_sigma);
   
   to_vector(Z) ~ std_normal();
   
@@ -395,18 +374,15 @@ model{
                          amt, cmt, evid, time, 
                          rate, ii, addl, ss, subj_start, subj_end, 
                          CL, VC, Q, VP, KA, KTR,
-                         sigma_p,
+                         sigma_sq_p, sigma_sq_a, sigma_p_a, 
                          lloq, bloq,
                          n_random, n_subjects, n_total,
-                         bioav, tlag, n_cmt, n_transit, solver,
-                         x_r, x_i);
+                         bioav, tlag, n_cmt, n_transit);
   }
 }
 generated quantities{
   
   real<lower = 0> TVKTR = (n_transit + 1)/TVMTT;
-  
-  real<lower = 0> sigma_sq_p = square(sigma_p);
 
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
@@ -505,124 +481,60 @@ generated quantities{
     omega_ka_mtt = Omega[5, 6];
 
     for(j in 1:n_subjects){
-      
-      if(solver == 1){
         
-        real tvke = TVCL/TVVC;
-        real tvk_cp = TVQ/TVVC;
-        real tvk_pc = TVQ/TVVP;
+      real tvke = TVCL/TVVC;
+      real tvk_cp = TVQ/TVVC;
+      real tvk_pc = TVQ/TVVP;
         
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
         
-        for(i in 1:(n_transit + 1)){
-          K[i, i] = -KTR[j];
-          K[(i + 1), i] = KTR[j];
-        }
-        
-        K[(n_transit + 2), (n_transit + 2)] = -KA[j];
-        K[(n_transit + 3), (n_transit + 2)] = KA[j];
-        K[(n_transit + 3), (n_transit + 3)] = -(CL[j]/VC[j] + Q[j]/VC[j]);
-        K[(n_transit + 3), (n_transit + 4)] = Q[j]/VP[j];
-        K[(n_transit + 4), (n_transit + 3)] = Q[j]/VC[j];
-        K[(n_transit + 4), (n_transit + 4)] = -Q[j]/VP[j];
-      
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, bioav, tlag)';
-        
-        for(i in 1:(n_transit + 1)){
-          K_tv[i, i] = -KTR[j];
-          K_tv[(i + 1), i] = KTR[j];
-        }
-        
-        K_tv[(n_transit + 2), (n_transit + 2)] = -TVKA;
-        K_tv[(n_transit + 3), (n_transit + 2)] = TVKA;
-        K_tv[(n_transit + 3), (n_transit + 3)] = -(TVCL/TVVC + TVQ/TVVC);
-        K_tv[(n_transit + 3), (n_transit + 4)] = TVQ/TVVP;
-        K_tv[(n_transit + 4), (n_transit + 3)] = TVQ/TVVC;
-        K_tv[(n_transit + 4), (n_transit + 4)] = -TVQ/TVVP;
-
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K_tv, bioav, tlag)';
-                           
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(transit_fixed_2cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], Q[j], VP[j], KA[j], MTT[j]}, 
-                         bioav, tlag, x_r, x_i)';
-                         
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(transit_fixed_2cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVQ, TVVP, TVKA, TVKTR}, 
-                         bioav, tlag)';
-                           
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(transit_fixed_2cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], Q[j], VP[j], KA[j], MTT[j]}, 
-                        bioav, tlag, x_r, x_i)';
-                         
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(transit_fixed_2cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {TVCL, TVVC, TVQ, TVVP, TVKA, TVKTR}, 
-                        bioav, tlag)';             
-                         
+      for(i in 1:(n_transit + 1)){
+        K[i, i] = -KTR[j];
+        K[(i + 1), i] = KTR[j];
       }
+        
+      K[(n_transit + 2), (n_transit + 2)] = -KA[j];
+      K[(n_transit + 3), (n_transit + 2)] = KA[j];
+      K[(n_transit + 3), (n_transit + 3)] = -(CL[j]/VC[j] + Q[j]/VC[j]);
+      K[(n_transit + 3), (n_transit + 4)] = Q[j]/VP[j];
+      K[(n_transit + 4), (n_transit + 3)] = Q[j]/VC[j];
+      K[(n_transit + 4), (n_transit + 4)] = -Q[j]/VP[j];
       
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K, bioav, tlag)';
+        
+      for(i in 1:(n_transit + 1)){
+        K_tv[i, i] = -KTR[j];
+        K_tv[(i + 1), i] = KTR[j];
+      }
+        
+      K_tv[(n_transit + 2), (n_transit + 2)] = -TVKA;
+      K_tv[(n_transit + 3), (n_transit + 2)] = TVKA;
+      K_tv[(n_transit + 3), (n_transit + 3)] = -(TVCL/TVVC + TVQ/TVVC);
+      K_tv[(n_transit + 3), (n_transit + 4)] = TVQ/TVVP;
+      K_tv[(n_transit + 4), (n_transit + 3)] = TVQ/TVVC;
+      K_tv[(n_transit + 4), (n_transit + 4)] = -TVQ/TVVP;
+
+      x_pred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K_tv, bioav, tlag)';
+                           
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], (n_transit + 3)] ./ VC[j];
       
@@ -641,7 +553,8 @@ generated quantities{
 
   for(i in 1:n_obs){
     real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
+    real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                          2*ipred_tmp*sigma_p_a);
     dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
     if(bloq_obs[i] == 1){
       // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
@@ -659,4 +572,6 @@ generated quantities{
   }
   
 }
+
+
 

@@ -9,10 +9,12 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("transit_savic_2cmt_linear/Stan/Fits/transit_savic_2cmt_exp.rds")
+fit <- read_rds(
+  "transit_fixed_ntr_2cmt_linear/Stan/Fits/transit_fixed_ntr_2cmt_ppa.rds")
 
-nonmem_data <- read_csv("transit_savic_2cmt_linear/Data/transit_savic_2cmt_exp.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_ppa.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -32,7 +34,8 @@ new_data_to_simulate <- nonmem_data %>%
   # filter(evid == 0) %>%
   group_by(ID) %>% 
   slice(c(1, n())) %>% 
-  expand(time = seq(time[1], time[2], by = 0.5)) %>%
+  expand(time = sort(unique(c(seq(0.1, 2, by = 0.1), 
+                              seq(time[1], time[2], by = 0.5))))) %>%
   # expand(time = seq(time[1], time[2], by = 2)) %>%
   ungroup() %>% 
   mutate(amt = 0,
@@ -75,22 +78,6 @@ subj_start <- new_data %>%
 
 subj_end <- c(subj_start[-1] - 1, n_time_new)  
 
-new_data_dose <- new_data %>% 
-  filter(evid == 1)
-
-n_dose <- new_data_dose %>% 
-  nrow()
-
-subj_start_dose <- new_data_dose %>% 
-  mutate(row_num = 1:n()) %>% 
-  group_by(ID) %>% 
-  slice_head(n = 1) %>%
-  ungroup() %>% 
-  select(row_num) %>% 
-  deframe()
-
-subj_end_dose <- c(subj_start_dose[-1] - 1, n_dose) 
-
 stan_data <- list(n_subjects = n_subjects,
                   n_time_new = n_time_new,
                   time = new_data$time,
@@ -103,16 +90,12 @@ stan_data <- list(n_subjects = n_subjects,
                   ss = new_data$ss,
                   subj_start = subj_start,
                   subj_end = subj_end,
-                  n_dose = n_dose,
-                  dosetime = new_data_dose$time,
-                  doseamt = new_data_dose$amt,
-                  subj_start_dose = subj_start_dose,
-                  subj_end_dose = subj_end_dose,
+                  n_transit = 6,
                   t_1 = 0,
                   t_2 = 24)
 
 model <- cmdstan_model(
-  "transit_savic_2cmt_linear/Stan/Predict/transit_savic_2cmt_exp_predict_observed_subjects.stan")
+  "transit_fixed_ntr_2cmt_linear/Stan/Predict/transit_fixed_ntr_2cmt_ppa_predict_observed_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
@@ -179,7 +162,34 @@ for(i in 1:ggforce::n_pages(tmp)){
           scale_x_continuous(name = "Time (h)",
                              breaks = seq(0, 168, by = 12),
                              labels = seq(0, 168, by = 12),
-                             limits = c(0, 48)) +
+                             limits = c(0, NA)) +
+          theme_bw() +
+          theme(axis.text = element_text(size = 14, face = "bold"),
+                axis.title = element_text(size = 18, face = "bold"),
+                legend.position = "bottom") +
+          ggforce::facet_wrap_paginate(~ ID, labeller = label_both,
+                                       nrow = 2, ncol = 2,
+                                       page = i, scales = "free"))
+  
+}
+
+for(i in 1:ggforce::n_pages(tmp)){
+  print(ggplot(post_preds_summary, aes(x = time, group = ID)) +
+          geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
+                      fill = "blue", alpha = 0.25, show.legend = FALSE) +
+          geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
+                      fill = "blue", alpha = 0.5, show.legend = FALSE) +
+          geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
+          geom_line(aes(y = pred), linetype = 2, size = 1.05) +
+          geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
+                     color = "red") +
+          scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+                             limits = c(NA, NA),
+                             trans = "identity") +
+          scale_x_continuous(name = "Time (h)",
+                             breaks = seq(0, 168, by = 12),
+                             labels = seq(0, 168, by = 12),
+                             limits = c(143, 150)) +
           theme_bw() +
           theme(axis.text = element_text(size = 14, face = "bold"),
                 axis.title = element_text(size = 18, face = "bold"),
@@ -192,14 +202,14 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Individual estimates (posterior mean)
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], NTR[ID], MTT[ID], 
+  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], MTT[ID], 
                auc_ss[ID], c_max[ID], t_max[ID], 
                t_half_alpha[ID], t_half_terminal[ID]) %>% 
   mean_qi() %>% 
-  select(ID, CL, VC, Q, VP, KA, NTR, MTT, 
-         auc_ss, c_max, t_max, starts_with("t_half")) %>% 
+  select(ID, CL, VC, Q, VP, KA, MTT, 
+         auc_ss, c_max, t_max, t_half_alpha, t_half_terminal) %>% 
   inner_join(post_preds_summary %>% 
-               filter(time == 48) %>% 
+               filter(time == 168) %>% 
                select(ID, c_trough = "ipred") %>% 
                distinct(),
              by = "ID")
