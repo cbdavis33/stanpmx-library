@@ -1,0 +1,239 @@
+// Two-compartment PK Model with Transit Compartment absorption
+// IIV on CL, VC, Q, VP, KA, NTR, MTT (full covariance matrix)
+// n_transit is a positive real number, not fixed, and not necessarily an integer
+// General ODE solution using pure Stan code to get out individual estimates of 
+//   AUC, Cmax, Tmax, ...
+// proportional error - DV = IPRED*(1 + eps_p)
+// Predictions are generated from a normal that is truncated below at 0
+
+functions{
+  
+  real normal_lb_rng(real mu, real sigma, real lb){
+    
+    real p_lb = normal_cdf(lb | mu, sigma);
+    real u = uniform_rng(p_lb, 1);
+    real y = mu + sigma * inv_Phi(u);
+    return y;
+
+  }
+  
+  vector transit_2cmt_ode(real t, 
+                          vector y,
+                          real cl, real vc, real q, real vp, real ka, 
+                          real n_tr, real f, real ktr, 
+                          int n_dose_subj,            // # of doses for this subject
+                          array[] real dosetime_subj, // dosetimes for this subject
+                          array[] real doseamt_subj,  // dose amounts for this subject
+                          real t_1, real t_2){ 
+    
+    // real ktr = (n_tr + 1)/mtt;
+    real k_inpt = f*pow(ktr, n_tr + 1)/exp(lgamma(n_tr + 1));
+    
+    real inpt = 0;
+    array[n_dose_subj] real ipt = rep_array(0.0, n_dose_subj);
+    
+    real ke = cl/vc;
+    real k_cp = q/vc;
+    real k_pc = q/vp;
+    
+    vector[7] dydt;
+    real slope = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3];
+    real x = (slope > 0 && y[2]/vc > y[6]) ? slope/vc : 0;
+    real z = t <= t_1 || (slope > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
+    
+    for(i in 1:n_dose_subj){
+      if(t >= dosetime_subj[i]){
+        real delta_t = t - dosetime_subj[i];
+        ipt[i] = doseamt_subj[i]*pow(delta_t, n_tr)*exp(-ktr*delta_t);
+      }
+    }
+    
+    inpt = sum(ipt);
+    
+    dydt[1] = k_inpt*inpt - ka*y[1];
+    dydt[2] = slope;
+    dydt[3] = k_cp*y[2] - k_pc*y[3];
+    dydt[4] = y[2];                                // AUC
+    dydt[5] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
+    dydt[6] = x;                                   // C_max 
+    dydt[7] = z;                                   // t_max 
+    
+    return dydt;
+    
+  }
+  
+}
+data{
+  
+  int n_subjects;
+  int n_subjects_new;
+  int n_time_new;
+  array[n_time_new] real time;
+  array[n_time_new] real amt;
+  array[n_time_new] int cmt;
+  array[n_time_new] int evid;
+  array[n_time_new] real rate;
+  array[n_time_new] real ii;
+  array[n_time_new] int addl;
+  array[n_time_new] int ss;
+  array[n_subjects_new] int subj_start;
+  array[n_subjects_new] int subj_end;
+  
+  int n_dose;
+  array[n_dose] real dosetime;
+  array[n_dose] real doseamt;
+  
+  array[n_subjects_new] int subj_start_dose;
+  array[n_subjects_new] int subj_end_dose;
+  
+  real<lower = 0> t_1;   // Time at which to start SS calculations (AUC_ss, C_max_ss, ...)
+  real<lower = t_1> t_2; // Time at which to end SS calculations (AUC_ss, C_max_ss, ...)
+  
+}
+transformed data{ 
+  
+  int n_random = 7; // Number of random effects
+  int n_cmt = 7;   // Absorption, central, peripheral, AUC, AUC_t1-t2, Cmax, Tmax
+  
+  array[n_subjects] real bioav = rep_array(1.0, n_subjects);
+  
+  vector[n_cmt] y0 = rep_vector(0.0, n_cmt);
+
+}
+parameters{ 
+  
+  real<lower = 0> TVCL;       
+  real<lower = 0> TVVC; 
+  real<lower = 0> TVQ;
+  real<lower = 0> TVVP;
+  real<lower = 0.5*(TVCL/TVVC + TVQ/TVVC + TVQ/TVVP +
+    sqrt((TVCL/TVVC + TVQ/TVVC + TVQ/TVVP)^2 - 4*TVCL/TVVC*TVQ/TVVP))> TVKA;
+  real<lower = 0> TVNTR; 
+  real<lower = 0> TVMTT; 
+  
+  vector<lower = 0>[n_random] omega;
+  cholesky_factor_corr[n_random] L;
+  
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
+  
+  matrix[n_random, n_subjects] Z;
+  
+}
+generated quantities{
+
+  vector[n_time_new] ipred;   // ipred for the observed individuals at the new timepoints
+  vector[n_time_new] pred;    // pred for the observed individuals at the new timepoints
+  vector[n_time_new] dv;      // dv for the observed individuals at the new timepoints
+  vector[n_time_new] auc;     // auc for the observed individuals from time 0 to the new timepoint
+  vector[n_subjects_new] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
+  vector[n_subjects_new] c_max;   // Cmax between t1 and t2 (c_max_ss)
+  vector[n_subjects_new] t_max;   // Tmax between t1 and t2, then subtract off t1
+  vector[n_subjects_new] t_half_alpha;  // alpha half-life
+  vector[n_subjects_new] t_half_terminal;  // terminal half-life
+  
+  vector[n_subjects_new] CL;
+  vector[n_subjects_new] VC;
+  vector[n_subjects_new] Q;
+  vector[n_subjects_new] VP;
+  vector[n_subjects_new] KA;
+  vector[n_subjects_new] NTR;
+  vector[n_subjects_new] MTT;
+  vector[n_subjects_new] KTR;
+
+  {
+    row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVQ, TVVP,
+                                                         TVKA, TVNTR, TVMTT});
+    
+    matrix[n_subjects_new, n_random] eta_new;
+    matrix[n_subjects_new, n_random] theta_new;
+    
+    array[n_time_new] vector[n_cmt] x_pred;
+    array[n_time_new] vector[n_cmt] x_ipred;
+    
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
+    
+    real sigma_sq_p = Sigma[1, 1];
+    real sigma_sq_a = Sigma[2, 2];
+    real sigma_p_a = Sigma[1, 2];
+    
+    vector[n_subjects_new] alpha;
+    vector[n_subjects_new] beta;
+    
+    real TVKTR = (TVNTR + 1)/TVMTT;
+    
+    alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
+                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    beta = 0.5*(CL./VC + Q./VC + Q./VP - 
+                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    
+    for(i in 1:n_subjects_new){
+      eta_new[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
+                                               diag_pre_multiply(omega, L))';
+    }
+    theta_new = (rep_matrix(typical_values, n_subjects_new) .* exp(eta_new));
+    
+    CL = col(theta_new, 1);
+    VC = col(theta_new, 2);
+    Q = col(theta_new, 3);
+    VP = col(theta_new, 4);
+    KA = col(theta_new, 5);
+    NTR = col(theta_new, 6);
+    MTT = col(theta_new, 7);
+    KTR = (NTR + 1) ./ MTT;
+
+    for(j in 1:n_subjects_new){
+      
+      real t0 = time[subj_start[j]];
+      int n_dose_subj = subj_end_dose[j] - subj_start_dose[j] + 1;
+      
+      array[n_dose_subj] real dosetime_subj = 
+        dosetime[subj_start_dose[j]:subj_end_dose[j]];
+      array[n_dose_subj] real doseamt_subj = 
+        doseamt[subj_start_dose[j]:subj_end_dose[j]];
+      
+      x_ipred[subj_start[j],] = y0;
+      x_pred[subj_start[j],] = y0;
+      
+      x_ipred[(subj_start[j] + 1):subj_end[j],] =
+          ode_ckrk(transit_2cmt_ode, y0, t0,
+                   time[(subj_start[j] + 1):subj_end[j]],
+                   CL[j], VC[j], Q[j], VP[j], KA[j], NTR[j], bioav[j], KTR[j],
+                   n_dose_subj, dosetime_subj, doseamt_subj,
+                   t_1, t_2);
+                      
+      x_pred[(subj_start[j] + 1):subj_end[j],] = 
+          ode_ckrk(transit_2cmt_ode, y0, t0, 
+                   time[(subj_start[j] + 1):subj_end[j]], 
+                   TVCL, TVVC, TVQ, TVVP, TVKA, TVNTR, bioav[j], TVKTR,
+                   n_dose_subj, dosetime_subj, doseamt_subj,
+                   t_1, t_2);
+
+      for(k in subj_start[j]:subj_end[j]){
+        ipred[k] = fmax(1e-14, x_ipred[k, 2] / VC[j]);
+        pred[k] = fmax(1e-14, x_pred[k, 2] / TVVC);
+        auc[k] = x_ipred[k, 3] / VC[j];
+      }
+ 
+      auc_ss[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
+      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]);
+      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
+      t_half_alpha[j] = log(2)/alpha[j];
+      t_half_terminal[j] = log(2)/beta[j];
+    }
+
+    for(i in 1:n_time_new){
+      if(ipred[i] == 0){
+        dv[i] = 0;
+      }else{
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                              2*ipred_tmp*sigma_p_a);
+        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      }
+    }
+  }
+}
+
+
