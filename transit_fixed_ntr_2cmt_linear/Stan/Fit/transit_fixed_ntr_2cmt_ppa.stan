@@ -513,8 +513,8 @@ generated quantities{
                          K, bioav, tlag)';
         
       for(i in 1:(n_transit + 1)){
-        K_tv[i, i] = -KTR[j];
-        K_tv[(i + 1), i] = KTR[j];
+        K_tv[i, i] = -TVKTR;
+        K_tv[(i + 1), i] = TVKTR;
       }
         
       K_tv[(n_transit + 2), (n_transit + 2)] = -TVKA;
