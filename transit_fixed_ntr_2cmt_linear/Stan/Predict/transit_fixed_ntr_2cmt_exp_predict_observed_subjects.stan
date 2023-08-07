@@ -44,10 +44,10 @@ functions{
     dydt[n_transit + 2] = ktr*y[n_transit + 1] - ka*y[n_transit + 2];
     dydt[n_transit + 3] = slope;
     dydt[n_transit + 4] = k_cp*y[n_transit + 3] - k_pc*y[n_transit + 4];
-    dydt[n_transit + 5] = y[n_transit + 3];                    // AUC
-    dydt[n_transit + 6] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
-    dydt[n_transit + 7] = x;                                   // C_max
-    dydt[n_transit + 8] = z;                                   // t_max
+    dydt[n_transit + 5] = y[n_transit + 3];                              // AUC
+    dydt[n_transit + 6] = t >= t_1 && t <= t_2 ? y[n_transit + 3] : 0;   // AUC_t_1-t_2
+    dydt[n_transit + 7] = x;                                             // C_max
+    dydt[n_transit + 8] = z;                                             // t_max
 
     return dydt;
   }
