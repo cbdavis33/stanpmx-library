@@ -1,10 +1,12 @@
-// Some subjects have First Order Absorption (oral/subcutaneous), some IV, some 
-//   both
+// First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model
-// IIV on CL, VC, KA, and BIOAV (full covariance matrix)
-// proportional error - DV = IPRED*(1 + eps_p)
-// Any of analytical, matrix-exponential, or general ODE solution (rk45 or bdf) 
-//   using Torsten (user's choice)
+// Nonlinear Bioavailability - Pin the bioavailability to be 1 at
+//   'reference_dose' mg. Bioavailability decreases in the form 
+//   bioav = 1 - FMAX*(dose - reference_dose)^HILL/(F50^HILL + (dose - reference_dose)^HILL)
+// IIV on CL, VC, KA (full covariance matrix)
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
+// Matrix-exponential solution using Torsten (the matrix-exponential seems to be
+//   faster than the analytical solution for this model)
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
 // Since we have a normal distribution on the error, but the DV must be > 0, it
@@ -68,22 +70,6 @@ functions{
 
   }
   
-  vector depot_1cmt_ode(real t, vector y, array[] real params, 
-                        array[] real x_r, array[] int x_i){
-    
-    real cl = params[1];
-    real vc = params[2];
-    real ka = params[3];
-    real ke = cl/vc;
-    
-    vector[2] dydt;
-
-    dydt[1] = -ka*y[1];           // depot
-    dydt[2] = ka*y[1] - ke*y[2];  // central
-    
-    return dydt;
-  }
-  
   real partial_sum_lpmf(array[] int seq_subj, int start, int end,
                         vector dv_obs, array[] int dv_obs_id, array[] int i_obs,
                         array[] real amt, array[] int cmt, array[] int evid, 
@@ -91,11 +77,10 @@ functions{
                         array[] int addl, array[] int ss,
                         array[] int subj_start, array[] int subj_end, 
                         vector CL, vector VC, vector KA, vector BIOAV,
-                        real sigma_p, 
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a, 
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
-                        array[] real tlag, int n_cmt, 
-                        int solver){
+                        array[] real tlag, int n_cmt){
                            
     real ptarget = 0;
                               
@@ -120,44 +105,13 @@ functions{
     
       int j = n + start - 1; // j is the ID of the current subject
       
-      if(solver == 1){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           {CL[j], VC[j], KA[j]},
-                           {BIOAV[j], 1}, tlag)';
-          
-      }else if(solver == 2){
-        
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        K[1, 1] = -KA[j];
-        K[2, 1] = KA[j];
-        K[2, 2] = -CL[j]/VC[j];
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      K[1, 1] = -KA[j];
+      K[2, 1] = KA[j];
+      K[2, 2] = -CL[j]/VC[j];
       
-        x_ipred[subj_start[j]:subj_end[j], ] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, {BIOAV[j], 1}, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
+      x_ipred[subj_start[j]:subj_end[j], ] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
                          rate[subj_start[j]:subj_end[j]],
                          ii[subj_start[j]:subj_end[j]],
@@ -165,26 +119,7 @@ functions{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], KA[j]}, 
-                         {BIOAV[j], 1}, tlag)';
-                           
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], KA[j]}, 
-                        {BIOAV[j], 1}, tlag)';
-                         
-      }
+                         K, {BIOAV[j], 1}, tlag)';
                       
       dv_ipred[subj_start[j]:subj_end[j]] = 
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
@@ -194,15 +129,19 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      real sigma_tmp = ipred_slice[i]*sigma_p;
+      
+      real ipred_tmp = ipred_slice[i];
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                            2*ipred_tmp*sigma_p_a);
+      
       if(bloq_slice[i] == 1){
-        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
+        ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_tmp, 
                                                             sigma_tmp),
-                                normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
+                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp); 
       }else{
-        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
+        ptarget += normal_lpdf(dv_obs_slice[i] | ipred_tmp, sigma_tmp) -
+                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
       }
     }                                         
                               
@@ -235,26 +174,33 @@ data{
   real<lower = 0> location_tvcl;    // Prior Location parameter for CL
   real<lower = 0> location_tvvc;    // Prior Location parameter for VC
   real<lower = 0> location_tvka;    // Prior Location parameter for KA
-  real<lower = 0> location_tvbioav; // Prior Location parameter for BIOAV
+  real<lower = 0, upper = 1> location_fmax; // Prior location parameter for FMAX (0.5)
+  real<lower = 0> location_f50;    // Prior location parameter for F50 (amount above reference_dose)
+  real<lower = 0> location_hill;   // Prior location parameter for hill parameter
   
   real<lower = 0> scale_tvcl;     // Prior Scale parameter for CL
   real<lower = 0> scale_tvvc;     // Prior Scale parameter for VC
   real<lower = 0> scale_tvka;     // Prior Scale parameter for KA
-  real<lower = 0> scale_tvbioav;  // Prior Scale parameter for BIOAV
+  real<lower = 0> scale_fmax;     // Prior Scale parameter for FMAX (3.5, kappa in beta_proportion())
+  real<lower = 0> scale_f50;      // Prior Scale parameter for F50
+  real<lower = 0> scale_hill;     // Prior Scale parameter for hill parameter
   
   real<lower = 0> scale_omega_cl;    // Prior scale parameter for omega_cl
   real<lower = 0> scale_omega_vc;    // Prior scale parameter for omega_vc
   real<lower = 0> scale_omega_ka;    // Prior scale parameter for omega_ka
-  real<lower = 0> scale_omega_bioav; // Prior scale parameter for omega_bioav
+  
+  real<lower = 0> reference_dose;  // reference dose for bioavailability (lowest dose)
+  array[n_subjects] real<lower = reference_dose> dose; // dose in mg for each subject
   
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
   
-  int<lower = 1, upper = 4> solver; // 1 = analytical, 2 = matrix exponential, 3 = rk45, 4 = bdf
- 
 }
 transformed data{ 
   
@@ -266,15 +212,19 @@ transformed data{
   vector[n_obs] lloq_obs = lloq[i_obs];
   array[n_obs] int bloq_obs = bloq[i_obs];
   
-  int n_random = 4;                    // Number of random effects
+  int n_random = 3;                    // Number of random effects
   int n_cmt = 2;                       // Number of states in the ODEs
   
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
-                                      scale_omega_ka, scale_omega_bioav}; 
+                                      scale_omega_ka}; 
+                                      
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
   
   array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
+  
+  vector[n_subjects] dose_minus_reference = to_vector(dose) - reference_dose;
   
 }
 parameters{ 
@@ -282,12 +232,16 @@ parameters{
   real<lower = 0> TVCL;       
   real<lower = 0> TVVC; 
   real<lower = TVCL/TVVC> TVKA;
-  real<lower = 0, upper = 1> TVBIOAV;
+  
+  real<lower = 0, upper = 1> FMAX;
+  real<lower = 0> F50;
+  real<lower = 0> HILL;
   
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -297,32 +251,44 @@ transformed parameters{
   vector[n_subjects] eta_cl;
   vector[n_subjects] eta_vc;
   vector[n_subjects] eta_ka;
-  vector[n_subjects] eta_bioav;
   vector[n_subjects] CL;
   vector[n_subjects] VC;
   vector[n_subjects] KA;
   vector[n_subjects] BIOAV;
   vector[n_subjects] KE;
+  
+  real<lower = 0> sigma_p = sigma[1];
+  real<lower = 0> sigma_a = sigma[2];
+  
+  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq_a = square(sigma_a);
+  
+  real cor_p_a;
+  real sigma_p_a;
 
   {
   
-    row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVKA, 
-                                                         TVBIOAV});
+    row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVKA});
 
     matrix[n_subjects, n_random] eta = diag_pre_multiply(omega, L * Z)';
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
     eta_ka = col(eta, 3);
-    eta_bioav = col(eta, 4);
     CL = col(theta, 1);
     VC = col(theta, 2);
     KA = col(theta, 3);
-    BIOAV = Phi(inv_Phi(TVBIOAV) + eta[, 4]);
+    BIOAV = 1 - (FMAX*dose_minus_reference^HILL./(F50^HILL + dose_minus_reference^HILL));
     KE = CL ./ VC;
+    
+    cor_p_a = R_Sigma[1, 2];
+    sigma_p_a = Sigma[1, 2];
   
   }
   
@@ -333,12 +299,16 @@ model{
   TVCL ~ lognormal(log(location_tvcl), scale_tvcl);
   TVVC ~ lognormal(log(location_tvvc), scale_tvvc);
   TVKA ~ lognormal(log(location_tvka), scale_tvka) T[TVCL/TVVC, ];
-  TVBIOAV ~ beta_proportion(location_tvbioav, scale_tvbioav);
+  
+  FMAX ~ beta_proportion(location_fmax, scale_fmax); 
+  F50 ~ lognormal(log(location_f50), scale_f50);
+  HILL ~ lognormal(log(location_hill), scale_hill);
   
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
-  sigma_p ~ normal(0, scale_sigma_p);
+  sigma ~ normal(0, scale_sigma);
+  L_Sigma ~ lkj_corr_cholesky(lkj_df_sigma);
   
   to_vector(Z) ~ std_normal();
   
@@ -349,38 +319,28 @@ model{
                          amt, cmt, evid, time, 
                          rate, ii, addl, ss, subj_start, subj_end, 
                          CL, VC, KA, BIOAV,
-                         sigma_p,
+                         sigma_sq_p, sigma_sq_a, sigma_p_a, 
                          lloq, bloq,
                          n_random, n_subjects, n_total,
-                         tlag, n_cmt, solver);
+                         tlag, n_cmt);
   }
 }
 generated quantities{
-  
-  real<lower = 0> sigma_sq_p = square(sigma_p);
 
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
   real<lower = 0> omega_ka = omega[3];
-  real<lower = 0> omega_bioav = omega[4];
 
   real<lower = 0> omega_sq_cl = square(omega_cl);
   real<lower = 0> omega_sq_vc = square(omega_vc);
   real<lower = 0> omega_sq_ka = square(omega_ka);
-  real<lower = 0> omega_sq_bioav = square(omega_bioav);
 
   real cor_cl_vc;
   real cor_cl_ka;
-  real cor_cl_bioav;
   real cor_vc_ka;
-  real cor_vc_bioav;
-  real cor_ka_bioav;
   real omega_cl_vc;
   real omega_cl_ka;
-  real omega_cl_bioav;
   real omega_vc_ka;
-  real omega_vc_bioav;
-  real omega_ka_bioav;
 
   vector[n_obs] ipred;
   vector[n_obs] pred;
@@ -403,86 +363,39 @@ generated quantities{
 
     cor_cl_vc = R[1, 2];
     cor_cl_ka = R[1, 3];
-    cor_cl_bioav = R[1, 4];
     cor_vc_ka = R[2, 3];
-    cor_vc_bioav = R[2, 4];
-    cor_ka_bioav = R[3, 4];
-
+    
     omega_cl_vc = Omega[1, 2];
     omega_cl_ka = Omega[1, 3];
-    omega_cl_bioav = Omega[1, 4];
     omega_vc_ka = Omega[2, 3];
-    omega_vc_bioav = Omega[2, 4];
-    omega_ka_bioav = Omega[3, 4];
-
+    
     for(j in 1:n_subjects){
       
-      if(solver == 1){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           {CL[j], VC[j], KA[j]},
-                           {BIOAV[j], 1}, tlag)';
-                           
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           {TVCL, TVVC, TVKA},
-                           {TVBIOAV, 1}, tlag)';
-          
-      }else if(solver == 2){
-        
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
-        K[1, 1] = -KA[j];
-        K[2, 1] = KA[j];
-        K[2, 2] = -CL[j]/VC[j];
+      real bioav_p = BIOAV[j];
       
-        x_ipred[subj_start[j]:subj_end[j], ] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, {BIOAV[j], 1}, tlag)';
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+      K[1, 1] = -KA[j];
+      K[2, 1] = KA[j];
+      K[2, 2] = -CL[j]/VC[j];
+      
+      x_ipred[subj_start[j]:subj_end[j], ] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K, {BIOAV[j], 1}, tlag)';
                            
-        K_tv[1, 1] = -TVKA;
-        K_tv[2, 1] = TVKA;
-        K_tv[2, 2] = -TVCL/TVVC;
+      K_tv[1, 1] = -TVKA;
+      K_tv[2, 1] = TVKA;
+      K_tv[2, 2] = -TVCL/TVVC;
 
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K_tv, {TVBIOAV, 1}, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
+      x_pred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
                          rate[subj_start[j]:subj_end[j]],
                          ii[subj_start[j]:subj_end[j]],
@@ -490,54 +403,7 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], KA[j]}, 
-                         {BIOAV[j], 1}, tlag)';
-                         
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVKA}, 
-                         {TVBIOAV, 1}, tlag)';
-                           
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], KA[j]}, 
-                        {BIOAV[j], 1}, tlag)';
-                        
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {TVCL, TVVC, TVKA}, 
-                        {TVBIOAV, 1}, tlag)';
-                         
-      }
+                         K_tv, {bioav_p, 1}, tlag)';
       
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
@@ -557,7 +423,8 @@ generated quantities{
 
   for(i in 1:n_obs){
     real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
+    real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                          2*ipred_tmp*sigma_p_a);
     dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
     if(bloq_obs[i] == 1){
       // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
