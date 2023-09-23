@@ -13,7 +13,7 @@ nonmem_data <- read_csv(file.path("parallel_first_order_1cmt_linear",
                                   "zero_into_depot_for_delays",
                                   "Data", 
                                   str_c("parallel_", n_depots, "_first_order_",
-                                        "no_initial_delay", "_prop.csv")),
+                                        "with_initial_delay", "_prop.csv")),
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -110,7 +110,7 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ka = rep(0.4, times = n_depots),
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
-                  scale_omega_dur = rep(0.4, times = n_depots - 1),
+                  scale_omega_dur = rep(0.4, times = n_depots),
                   alpha_tvfrac = 1,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
@@ -122,7 +122,7 @@ rsimplex <- function(n_depots){
   x <- 1 + runif(n_depots, -0.5, 0.5)
   
   return(x/sum(x))
- 
+  
 }
 
 model <- cmdstan_model(
@@ -130,7 +130,7 @@ model <- cmdstan_model(
             "zero_into_depot_for_delays",
             "Stan", 
             "Fit",
-            "parallel_first_order_1cmt_no_initial_delay_prop_all_solvers.stan"),
+            "parallel_first_order_1cmt_with_initial_delay_prop_all_solvers.stan"),
   cpp_options = list(stan_threads = TRUE))
 
 fit_mat_exp <- model$sample(
@@ -147,11 +147,11 @@ fit_mat_exp <- model$sample(
   init = function() list(TVKA = sort(rlnorm(n_depots, log(0.01), 1)),
                          TVCL = rlnorm(1, log(1), 0.3),
                          TVVC = rlnorm(1, log(8), 0.3),
-                         TVDUR_backward = sort(rlnorm(n_depots - 1, log(500), 
+                         TVDUR_backward = sort(rlnorm(n_depots, log(500), 
                                                       0.7), 
                                                decreasing = FALSE),
                          TVFRAC = rsimplex(n_depots),
-                         omega = rlnorm(n_depots + (n_depots - 1) + 2, 
+                         omega = rlnorm(n_depots + n_depots + 2, 
                                         log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
@@ -160,7 +160,7 @@ fit_mat_exp$save_object(
             "zero_into_depot_for_delays",
             "Stan", 
             "Fits",
-            "parallel_first_order_1cmt_no_initial_delay_prop_mat_exp.rds"))
+            "parallel_first_order_1cmt_with_initial_delay_prop_mat_exp.rds"))
 
 
 stan_data$solver <- 2
@@ -178,11 +178,11 @@ fit_rk45 <- model$sample(
   init = function() list(TVKA = sort(rlnorm(n_depots, log(0.01), 1)),
                          TVCL = rlnorm(1, log(1), 0.3),
                          TVVC = rlnorm(1, log(8), 0.3),
-                         TVDUR_backward = sort(rlnorm(n_depots - 1, log(500), 
+                         TVDUR_backward = sort(rlnorm(n_depots, log(500), 
                                                       0.7), 
                                                decreasing = FALSE),
                          TVFRAC = rsimplex(n_depots),
-                         omega = rlnorm(n_depots + (n_depots - 1) + 2, 
+                         omega = rlnorm(n_depots + n_depots + 2, 
                                         log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
@@ -191,7 +191,7 @@ fit_rk45$save_object(
             "zero_into_depot_for_delays",
             "Stan", 
             "Fits",
-            "parallel_first_order_1cmt_no_initial_delay_prop_rk45.rds"))
+            "parallel_first_order_1cmt_with_initial_delay_prop_rk45.rds"))
 
 stan_data$solver <- 3
 fit_bdf <- model$sample(
@@ -208,11 +208,11 @@ fit_bdf <- model$sample(
   init = function() list(TVKA = sort(rlnorm(n_depots, log(0.01), 1)),
                          TVCL = rlnorm(1, log(1), 0.3),
                          TVVC = rlnorm(1, log(8), 0.3),
-                         TVDUR_backward = sort(rlnorm(n_depots - 1, log(500), 
+                         TVDUR_backward = sort(rlnorm(n_depots, log(500), 
                                                       0.7), 
                                                decreasing = FALSE),
                          TVFRAC = rsimplex(n_depots),
-                         omega = rlnorm(n_depots + (n_depots - 1) + 2, 
+                         omega = rlnorm(n_depots + n_depots + 2, 
                                         log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
@@ -221,5 +221,5 @@ fit_bdf$save_object(
             "zero_into_depot_for_delays",
             "Stan", 
             "Fits",
-            "parallel_first_order_1cmt_no_initial_delay_prop_bdf.rds"))
+            "parallel_first_order_1cmt_with_initial_delay_prop_bdf.rds"))
 

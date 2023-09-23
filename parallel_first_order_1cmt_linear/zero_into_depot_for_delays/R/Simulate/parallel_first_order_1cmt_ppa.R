@@ -218,7 +218,7 @@ plotly::ggplotly(p_1 +
 #   facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 delay_string <- if_else(delay_on_fastest_depot == 0, "no_initial_delay",
-                        "initial_delay")
+                        "with_initial_delay")
 
 if(sigma_a == 0){
   

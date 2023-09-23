@@ -4,17 +4,16 @@
 //   place (n_depots >= 2).
 // A delay in absorption for each process is implemented with a zero-order 
 //   distributive delay (like an infusion into the depot) to bring about a
-//   delayed absorption. For this model, the fastest depot does NOT have a delay
+//   delayed absorption. For this model, the fastest depot DOES have a delay
 // There will be n_depots KA values for each subject. i.e., TVKA and KAi are 
 //   vectors. KA is intended to be ordered so that 
 //   KA_1 < KA_2 < ... < KA_n_depots. This doesn't do this exactly, but it will 
 //   have TVKA_1 < TVKA_2 < ... < TVKA_n_depots and hope the individual effects 
 //   don't mess that up
-// There will be (n_depots - 1) DUR values for each subject. i.e., TVDUR and 
-//   DURi are vectors. DUR is intended to be ordered so that 
-//   DUR_1 > DUR_2 > ... > DUR_(n_depots - 1), and DUR_n_depots = 0. This 
-//   doesn't do this exactly, but it will have 
-//   TVDUR_1 > TVDUR_2 > ... > TVDUR_(n_depots - 1) and hope the individual
+// There will be (n_depots DUR values for each subject. i.e., TVDUR and DURi
+//   are vectors. DUR is intended to be ordered so that 
+//   DUR_1 > DUR_2 > ... > DUR_n_depots. This doesn't do this exactly, but it 
+//   will have TVDUR_1 > TVDUR_2 > ... > TVDUR_n_depots and hope the individual
 //   effects don't mess that up
 // TVFRAC is a simplex of length n_depots that tells how much of the dose goes 
 //   into each absorption process. There is no IIV on FRAC
@@ -173,7 +172,7 @@ functions{
       
       for(i in subj_start[j]:subj_end[j]){
 
-        if(cmt[i] <= (n_depots - 1)){
+        if(cmt[i] <= n_depots){
           rate[i] = amt[i]/DUR[j, cmt[i]];
         }else{
           rate[i] = 0;
@@ -296,7 +295,7 @@ data{
   array[n_depots] real<lower = 0> scale_omega_ka;      // Prior scale parameter for omega_ka
   real<lower = 0> scale_omega_cl;                      // Prior scale parameter for omega_cl
   real<lower = 0> scale_omega_vc;                      // Prior scale parameter for omega_vc
-  array[n_depots - 1] real<lower = 0> scale_omega_dur; // Prior scale parameter for omega_dur
+  array[n_depots] real<lower = 0> scale_omega_dur; // Prior scale parameter for omega_dur
   
   real<lower = 0> alpha_tvfrac; // Prior for dirichlet distribution for TVFRAC
   
@@ -319,7 +318,7 @@ transformed data{
   vector[n_obs] lloq_obs = lloq[i_obs];
   array[n_obs] int bloq_obs = bloq[i_obs];
   
-  int n_random = n_depots + (n_depots - 1) + 2; // Number of random effects
+  int n_random = n_depots + n_depots + 2; // Number of random effects
   int n_cmt = n_depots + 1;                     // Number of states in the ODEs
   
   array[n_random] real scale_omega = 
@@ -340,7 +339,7 @@ parameters{
   positive_ordered[n_depots] TVKA;
   real<lower = 0> TVCL;       
   real<lower = 0> TVVC; 
-  positive_ordered[n_depots - 1] TVDUR_backward;
+  positive_ordered[n_depots] TVDUR_backward;
   
   simplex[n_depots] TVFRAC;
   
@@ -357,15 +356,15 @@ transformed parameters{
   array[n_subjects] row_vector[n_depots] eta_ka;
   vector[n_subjects] eta_cl;
   vector[n_subjects] eta_vc;
-  array[n_subjects] row_vector[n_depots - 1] eta_dur;
+  array[n_subjects] row_vector[n_depots] eta_dur;
   
   array[n_subjects] row_vector[n_depots] KA;
   vector[n_subjects] CL;
   vector[n_subjects] VC;
-  array[n_subjects] row_vector[n_depots - 1] DUR;
+  array[n_subjects] row_vector[n_depots] DUR;
   vector[n_subjects] KE;
   
-  vector[n_depots - 1] TVDUR = reverse(TVDUR_backward);
+  vector[n_depots] TVDUR = reverse(TVDUR_backward);
 
   {
     
@@ -436,12 +435,12 @@ generated quantities{
   vector<lower = 0>[n_depots] omega_ka = omega[1:n_depots];
   real<lower = 0> omega_cl = omega[n_depots + 1];
   real<lower = 0> omega_vc = omega[n_depots + 2];
-  vector<lower = 0>[n_depots - 1] omega_dur = omega[(n_depots + 2 + 1):n_random];
+  vector<lower = 0>[n_depots] omega_dur = omega[(n_depots + 2 + 1):n_random];
   
   vector<lower = 0>[n_depots] omega_sq_ka = square(omega_ka);
   real<lower = 0> omega_sq_cl = square(omega_cl);
   real<lower = 0> omega_sq_vc = square(omega_vc);
-  vector<lower = 0>[n_depots - 1] omega_sq_dur = square(omega_dur);
+  vector<lower = 0>[n_depots] omega_sq_dur = square(omega_dur);
 
   // Normally this is where I'd try to return named correlations and covariances
   // (e.g. cor_cl_ka, omega_cl_ka), but since n_depots can vary, there's no 
@@ -478,11 +477,11 @@ generated quantities{
       vector[n_depots] ka_p = TVKA;
       real cl_p = TVCL;
       real vc_p = TVVC;
-      vector[n_depots - 1] dur_p = TVDUR;
+      vector[n_depots] dur_p = TVDUR;
                     
       for(i in subj_start[j]:subj_end[j]){
 
-        if(cmt[i] <= (n_depots - 1)){
+        if(cmt[i] <= n_depots){
           
           rate[i] = amt[i]/DUR[j, cmt[i]];
           rate_p[i] = amt[i]/dur_p[cmt[i]];

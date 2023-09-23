@@ -4,22 +4,21 @@
 //   place (n_depots >= 2).
 // A delay in absorption for each process is implemented with a zero-order 
 //   distributive delay (like an infusion into the depot) to bring about a
-//   delayed absorption. For this model, the fastest depot does NOT have a delay
+//   delayed absorption. For this model, the fastest depot DOES have a delay
 // There will be n_depots KA values for each subject. i.e., TVKA and KAi are 
 //   vectors. KA is intended to be ordered so that 
 //   KA_1 < KA_2 < ... < KA_n_depots. This doesn't do this exactly, but it will 
 //   have TVKA_1 < TVKA_2 < ... < TVKA_n_depots and hope the individual effects 
 //   don't mess that up
-// There will be (n_depots - 1) DUR values for each subject. i.e., TVDUR and 
-//   DURi are vectors. DUR is intended to be ordered so that 
-//   DUR_1 > DUR_2 > ... > DUR_(n_depots - 1), and DUR_n_depots = 0. This 
-//   doesn't do this exactly, but it will have 
-//   TVDUR_1 > TVDUR_2 > ... > TVDUR_(n_depots - 1) and hope the individual
+// There will be (n_depots DUR values for each subject. i.e., TVDUR and DURi
+//   are vectors. DUR is intended to be ordered so that 
+//   DUR_1 > DUR_2 > ... > DUR_n_depots. This doesn't do this exactly, but it 
+//   will have TVDUR_1 > TVDUR_2 > ... > TVDUR_n_depots and hope the individual
 //   effects don't mess that up
 // TVFRAC is a simplex of length n_depots that tells how much of the dose goes 
 //   into each absorption process. There is no IIV on FRAC
 // IIV on CL, VC, KA, DUR (full covariance matrix)
-// Either of matrix-exponential or general ODE solution using Torsten
+// Matrix-exponential solution using Torsten
 // proportional error - DV = IPRED*(1 + eps_p)
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
@@ -83,53 +82,7 @@ functions{
     return y; 
 
   }
-  
-  // An ODE that is written to take n_depots as an input. It should work for any
-  //   n_depots >= 2
-  vector parallel_1cmt_ode(real t, vector y, array[] real params, 
-                           array[] real x_r, array[] int x_i){
-    
-    int n_depots = x_i[1];
-    
-    real cl = params[n_depots + 1];
-    real vc = params[n_depots + 2];
-    real ke = cl/vc;
-    
-    vector[n_depots + 1] dydt;
 
-    for(i in 1:n_depots){
-      dydt[i] = -params[i]*y[i];
-    }
-    dydt[n_depots + 1] = to_row_vector(params[1:n_depots])*y[1:n_depots] - 
-                                                            ke*y[n_depots + 1];
-    
-    return dydt;
-    
-  }
-  
-  // An ODE that is written specifically for n_depots = 3. I don't ever use this
-  //   one, but it is here to show what the flexible one above is doing.
-  vector parallel_3_1cmt_ode(real t, vector y, array[] real params, 
-                             array[] real x_r, array[] int x_i){
-    
-    real ka_1 = params[1];
-    real ka_2 = params[2];
-    real ka_3 = params[3];
-    real cl = params[4];
-    real vc = params[5];
-    
-    real ke = cl/vc;
-    
-    vector[4] dydt;
-
-    dydt[1] = -ka_1*y[1];           // depot_slow
-    dydt[2] = -ka_2*y[2];           // depot_medium
-    dydt[3] = -ka_3*y[3];           // depot_fast
-    dydt[4] = ka_1*y[1] + ka_2*y[2] + ka_3*y[3] - ke*y[4];  // central
-    
-    return dydt;
-  }
-  
   real partial_sum_lpmf(array[] int seq_subj, int start, int end,
                         vector dv_obs, array[] int dv_obs_id, array[] int i_obs,
                         array[] real amt, array[] int cmt, array[] int evid, 
@@ -143,8 +96,7 @@ functions{
                         int n_random, int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, int n_cmt, 
                         int n_depots, 
-                        data array[,] real x_r, data array[,] int x_i,
-                        int solver){
+                        data array[,] real x_r, data array[,] int x_i){
                            
     real ptarget = 0;
                               
@@ -173,7 +125,7 @@ functions{
       
       for(i in subj_start[j]:subj_end[j]){
 
-        if(cmt[i] <= (n_depots - 1)){
+        if(cmt[i] <= n_depots){
           rate[i] = amt[i]/DUR[j, cmt[i]];
         }else{
           rate[i] = 0;
@@ -181,35 +133,18 @@ functions{
         if(is_inf(rate[i])) rate[i] = 0;
       
       }
-      
-      if(solver == 1){
+
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
         
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      for(i in 1:n_depots){
+        K[i, i] = -KA[j, i];
+        K[(n_depots + 1), i] = KA[j, i];
+      }
         
-        for(i in 1:n_depots){
-          K[i, i] = -KA[j, i];
-          K[(n_depots + 1), i] = KA[j, i];
-        }
+      K[(n_depots + 1), (n_depots + 1)] = -CL[j]/VC[j];
         
-        K[(n_depots + 1), (n_depots + 1)] = -CL[j]/VC[j];
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, bioav, tlag)';
-                           
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(parallel_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
                          rate[subj_start[j]:subj_end[j]],
                          ii[subj_start[j]:subj_end[j]],
@@ -217,26 +152,9 @@ functions{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
-                         bioav, tlag, x_r, x_i)';
+                         K, bioav, tlag)';
                            
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(parallel_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
-                        bioav, tlag, x_r, x_i)';
-                         
-      }
+      
                       
       dv_ipred[subj_start[j]:subj_end[j]] = 
                     x_ipred[subj_start[j]:subj_end[j], (n_depots + 1)] ./ VC[j];
@@ -291,12 +209,12 @@ data{
   real<lower = 0> scale_tvka;     // Prior Scale parameter for KA
   real<lower = 0> scale_tvcl;     // Prior Scale parameter for CL
   real<lower = 0> scale_tvvc;     // Prior Scale parameter for VC
-  real<lower = 0> scale_tvdur;    // Prior Scale parameter for DUR
+  array[n_depots] real<lower = 0> scale_tvdur;    // Prior Scale parameter for DUR
   
   array[n_depots] real<lower = 0> scale_omega_ka;      // Prior scale parameter for omega_ka
   real<lower = 0> scale_omega_cl;                      // Prior scale parameter for omega_cl
   real<lower = 0> scale_omega_vc;                      // Prior scale parameter for omega_vc
-  array[n_depots - 1] real<lower = 0> scale_omega_dur; // Prior scale parameter for omega_dur
+  array[n_depots] real<lower = 0> scale_omega_dur;     // Prior scale parameter for omega_dur
   
   real<lower = 0> alpha_tvfrac; // Prior for dirichlet distribution for TVFRAC
   
@@ -305,8 +223,6 @@ data{
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
-  
-  int<lower = 1, upper = 3> solver; // 1 = matrix exponential, 2 = rk45, 3 = bdf
  
 }
 transformed data{ 
@@ -319,8 +235,8 @@ transformed data{
   vector[n_obs] lloq_obs = lloq[i_obs];
   array[n_obs] int bloq_obs = bloq[i_obs];
   
-  int n_random = n_depots + (n_depots - 1) + 2; // Number of random effects
-  int n_cmt = n_depots + 1;                     // Number of states in the ODEs
+  int n_random = n_depots + n_depots + 2; // Number of random effects
+  int n_cmt = n_depots + 1;               // Number of states in the ODEs
   
   array[n_random] real scale_omega = 
     append_array(append_array(scale_omega_ka, {scale_omega_cl, scale_omega_vc}), 
@@ -340,7 +256,7 @@ parameters{
   positive_ordered[n_depots] TVKA;
   real<lower = 0> TVCL;       
   real<lower = 0> TVVC; 
-  positive_ordered[n_depots - 1] TVDUR_backward;
+  positive_ordered[n_depots] TVDUR_backward;
   
   simplex[n_depots] TVFRAC;
   
@@ -357,15 +273,15 @@ transformed parameters{
   array[n_subjects] row_vector[n_depots] eta_ka;
   vector[n_subjects] eta_cl;
   vector[n_subjects] eta_vc;
-  array[n_subjects] row_vector[n_depots - 1] eta_dur;
+  array[n_subjects] row_vector[n_depots] eta_dur;
   
   array[n_subjects] row_vector[n_depots] KA;
   vector[n_subjects] CL;
   vector[n_subjects] VC;
-  array[n_subjects] row_vector[n_depots - 1] DUR;
+  array[n_subjects] row_vector[n_depots] DUR;
   vector[n_subjects] KE;
   
-  vector[n_depots - 1] TVDUR = reverse(TVDUR_backward);
+  vector[n_depots] TVDUR = reverse(TVDUR_backward);
 
   {
     
@@ -426,7 +342,7 @@ model{
                          lloq, bloq,
                          n_random, n_subjects, n_total,
                          append_array(to_array_1d(TVFRAC), {1.0}), 
-                         tlag, n_cmt, n_depots, x_r, x_i, solver);
+                         tlag, n_cmt, n_depots, x_r, x_i);
   }
 }
 generated quantities{
@@ -436,12 +352,12 @@ generated quantities{
   vector<lower = 0>[n_depots] omega_ka = omega[1:n_depots];
   real<lower = 0> omega_cl = omega[n_depots + 1];
   real<lower = 0> omega_vc = omega[n_depots + 2];
-  vector<lower = 0>[n_depots - 1] omega_dur = omega[(n_depots + 2 + 1):n_random];
+  vector<lower = 0>[n_depots] omega_dur = omega[(n_depots + 2 + 1):n_random];
   
   vector<lower = 0>[n_depots] omega_sq_ka = square(omega_ka);
   real<lower = 0> omega_sq_cl = square(omega_cl);
   real<lower = 0> omega_sq_vc = square(omega_vc);
-  vector<lower = 0>[n_depots - 1] omega_sq_dur = square(omega_dur);
+  vector<lower = 0>[n_depots] omega_sq_dur = square(omega_dur);
 
   // Normally this is where I'd try to return named correlations and covariances
   // (e.g. cor_cl_ka, omega_cl_ka), but since n_depots can vary, there's no 
@@ -478,11 +394,11 @@ generated quantities{
       vector[n_depots] ka_p = TVKA;
       real cl_p = TVCL;
       real vc_p = TVVC;
-      vector[n_depots - 1] dur_p = TVDUR;
+      vector[n_depots] dur_p = TVDUR;
                     
       for(i in subj_start[j]:subj_end[j]){
 
-        if(cmt[i] <= (n_depots - 1)){
+        if(cmt[i] <= n_depots){
           
           rate[i] = amt[i]/DUR[j, cmt[i]];
           rate_p[i] = amt[i]/dur_p[cmt[i]];
@@ -496,54 +412,20 @@ generated quantities{
       
       }
       
-      if(solver == 1){
-        
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
-        
-        for(i in 1:n_depots){
-          K[i, i] = -KA[j, i];
-          K[(n_depots + 1), i] = KA[j, i];
-        }
-        
-        K[(n_depots + 1), (n_depots + 1)] = -KE[j];
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, bioav, tlag)';
-        
-        
-        for(i in 1:n_depots){
-          K_tv[i, i] = -ka_p[i];
-          K_tv[(n_depots + 1), i] = ka_p[i];
-        }
-        
-        K_tv[(n_depots + 1), (n_depots + 1)] = -cl_p/vc_p;
 
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate_p[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K_tv, bioav, tlag)';
-                           
-      }else if(solver == 2){
         
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(parallel_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+        
+      for(i in 1:n_depots){
+        K[i, i] = -KA[j, i];
+        K[(n_depots + 1), i] = KA[j, i];
+      }
+        
+      K[(n_depots + 1), (n_depots + 1)] = -KE[j];
+      
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
                          rate[subj_start[j]:subj_end[j]],
                          ii[subj_start[j]:subj_end[j]],
@@ -551,55 +433,27 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
-                         bioav, tlag, x_r, x_i)';
-
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(parallel_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         append_array(to_array_1d(ka_p), {cl_p, vc_p}), 
-                         bioav, tlag, x_r, x_i)';
-                           
-      }else{
+                         K, bioav, tlag)';
+      
         
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(parallel_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
-                        bioav, tlag, x_r, x_i)';
-
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(parallel_1cmt_ode,
-                        n_cmt,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        append_array(to_array_1d(ka_p), {cl_p, vc_p}), 
-                        bioav, tlag, x_r, x_i)';             
-                         
+      for(i in 1:n_depots){
+        K_tv[i, i] = -ka_p[i];
+        K_tv[(n_depots + 1), i] = ka_p[i];
       }
       
+      K_tv[(n_depots + 1), (n_depots + 1)] = -cl_p/vc_p;
+      
+      x_pred[subj_start[j]:subj_end[j],] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate_p[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K_tv, bioav, tlag)';
+                         
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], (n_depots + 1)] ./ VC[j];
       
