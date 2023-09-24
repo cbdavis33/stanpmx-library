@@ -18,8 +18,13 @@
 // FRAC is a simplex of length n_depots that tells how much of the dose goes into
 //   each absorption process. There is no IIV on FRAC
 // IIV on CL, VC, KA, DUR (full covariance matrix)
-// Either of matrix-exponential or general ODE solution using Torsten
-// exponential error - DV = IPRED*exp(eps)
+// General ODE solution using Torsten
+// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
+// Since we have a normal distribution on the error, but the DV must be > 0, it
+//   generates values from a normal that is truncated below at 0
+// Output includes individual Cmax over the whole time period, Tmax between t1 
+//   and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like a 
+//   dosing interval)
 
 functions{
   
@@ -43,13 +48,23 @@ functions{
     real vc = params[n_depots + 2];
     real ke = cl/vc;
     
-    vector[n_depots + 1] dydt;
+    real t_1 = x_r[1];
+    real t_2 = x_r[2];
+    
+    real slope = to_row_vector(params[1:n_depots])*y[1:n_depots] - 
+                                                            ke*y[n_depots + 1];
+    real x = slope > 0 && y[n_depots + 1]/vc > y[n_depots + 3] ? slope/vc : 0;
+    real z = t <= t_1 || (slope > 0 && t >= t_1 && t <= t_2 && y[n_depots + 1]/vc > y[n_depots + 3]) ? 1 : 0;
+    
+    vector[n_depots + 4] dydt;
 
     for(i in 1:n_depots){
       dydt[i] = -params[i]*y[i];
     }
-    dydt[n_depots + 1] = to_row_vector(params[1:n_depots])*y[1:n_depots] - 
-                                                            ke*y[n_depots + 1];
+    dydt[n_depots + 1] = slope;
+    dydt[n_depots + 2] = t >= t_1 && t <= t_2 ? y[n_depots + 1] : 0; // AUC_t_1-t_2
+    dydt[n_depots + 3] = x;                                          // C_max
+    dydt[n_depots + 4] = z;                                          // t_max
     
     return dydt;
     
@@ -116,15 +131,18 @@ data{
                                  // correlation matrix in transformed data, but it's easy
                                  // enough to do in R
   
-  real<lower = 0> sigma;
+  real<lower = 0> sigma_p;
+  real<lower = 0> sigma_a;
+  real<lower = -1, upper = 1> cor_p_a;
   
-  int<lower = 1, upper = 3> solver; // 1 = matrix-exponential, 2 = rk45, 3 = bdf
+  real<lower = 0> t_1;
+  real<lower = t_1> t_2;
   
 }
 transformed data{
   
   int n_random = 2*n_depots + 2; // Number of random effects
-  int n_cmt = n_depots + 1;      // Depot_1, ..., Depot_n, central
+  int n_cmt = n_depots + 4;      // Depot_1, ..., Depot_n, central, AUC_t1_t2, Cmax, Tmax
   
   vector<lower = 0>[n_depots] TVDUR_to_use = TVDUR;
   vector<lower = 0>[n_depots] omega_dur_to_use = omega_dur;
@@ -143,11 +161,19 @@ transformed data{
                              to_vector(omega_dur_to_use));
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
+
+  vector[2] sigma = [sigma_p, sigma_a]';
+  matrix[2, 2] R_Sigma = rep_matrix(1, 2, 2);
+  R_Sigma[1, 2] = cor_p_a;
+  R_Sigma[2, 1] = cor_p_a;
   
-  array[n_cmt] real bioav = append_array(to_array_1d(TVFRAC), {1.0}); 
+  matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
+  
+  array[n_cmt] real bioav = append_array(to_array_1d(TVFRAC), 
+                                           rep_array(1.0, (n_cmt - n_depots)));
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding. The delay comes from the infusion into the depots
   
-  array[1, 2] real x_r = {{8675309, 5555555}}; // This is a placeholder of nonsense so I can put it in the Torsten function
+  array[1, 2] real x_r = {{t_1, t_2}};
   
   array[1, 1] int x_i = {{n_depots}};
   
@@ -159,6 +185,10 @@ generated quantities{
   
   vector[n_total] ipred; // concentration with no residual error
   vector[n_total] dv;    // concentration with residual error
+  vector[n_subjects] auc_t1_t2;  // AUC from t1 up to t2 
+  vector[n_subjects] c_max;      // Cmax between t1 and t2 
+  vector[n_subjects] t_max;      // Tmax between t1 and t2, then subtract off t1
+  vector[n_subjects] t_half;     // Thalf
   
   array[n_subjects] row_vector[n_depots] KA;
   vector[n_subjects] CL;
@@ -202,49 +232,28 @@ generated quantities{
         }
         if(is_inf(rate[i])) rate[i] = 0;
       }
-      
-      if(solver == 1){
         
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        
-        for(i in 1:n_depots){
-          K[i, i] = -KA[j, i];
-          K[(n_depots + 1), i] = KA[j, i];
-        }
-        
-        K[(n_depots + 1), (n_depots + 1)] = -KE[j];
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
-                           amt[subj_start[j]:subj_end[j]],
-                           rate[subj_start[j]:subj_end[j]],
-                           ii[subj_start[j]:subj_end[j]],
-                           evid[subj_start[j]:subj_end[j]],
-                           cmt[subj_start[j]:subj_end[j]],
-                           addl[subj_start[j]:subj_end[j]],
-                           ss[subj_start[j]:subj_end[j]],
-                           K, bioav, tlag)';
-                           
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(parallel_1cmt_ode,
-                         n_cmt,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
-                         bioav, tlag, x_r, x_i)';
-                         
-      }
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(parallel_1cmt_ode,
+                       n_cmt,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       append_array(to_array_1d(KA[j]), {CL[j], VC[j]}), 
+                       bioav, tlag, x_r, x_i)';
 
       ipred[subj_start[j]:subj_end[j]] = 
                     x_ipred[subj_start[j]:subj_end[j], (n_depots + 1)] ./ VC[j];
+                    
+      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], n_depots + 2]) / VC[j];
+      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], n_depots + 3]);
+      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], n_depots + 4]) - t_1;
+      t_half[j] = log(2) ./ KE[j];
     
     }
 
@@ -252,7 +261,11 @@ generated quantities{
       if(ipred[i] == 0){
          dv[i] = 0;
       }else{
-        dv[i] = lognormal_rng(log(ipred[i]), sigma);
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] + 
+                              2*ipred_tmp*Sigma[2, 1]);
+        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+        
       }
     }
   }
