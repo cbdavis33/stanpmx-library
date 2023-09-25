@@ -12,10 +12,10 @@ library(tidyverse)
 set_cmdstan_path("~/Torsten/cmdstan")
 
 fit <- read_rds(
-  "bioav_nonlinear_dose_1cmt_linear/Stan/Fits/bioav_nonlinear_dose_1cmt_ppa.rds")
+  "bioav_nonlinear_dose_2cmt_linear/Stan/Fits/bioav_nonlinear_dose_2cmt_exp.rds")
 
 nonmem_data <- read_csv(
-  "bioav_nonlinear_dose_1cmt_linear/Data/bioav_nonlinear_dose_1cmt_ppa.csv",
+  "bioav_nonlinear_dose_2cmt_linear/Data/bioav_nonlinear_dose_2cmt_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -72,7 +72,7 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "bioav_nonlinear_dose_1cmt_linear/Stan/Predict/bioav_nonlinear_dose_1cmt_ppa_predict_new_subjects.stan")
+  "bioav_nonlinear_dose_2cmt_linear/Stan/Predict/bioav_nonlinear_dose_2cmt_exp_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
