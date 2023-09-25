@@ -15,7 +15,7 @@ fit <- read_rds(
   "bioav_nonlinear_dose_1cmt_linear/Stan/Fits/bioav_nonlinear_dose_1cmt_exp.rds")
 
 nonmem_data <- read_csv(
-  "bioav_nonlinear_dose_1cmt_linear/Data/bioav_nonlinear_dose_1cmt_prop.csv",
+  "bioav_nonlinear_dose_1cmt_linear/Data/bioav_nonlinear_dose_1cmt_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
