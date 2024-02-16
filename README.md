@@ -102,4 +102,4 @@ of time on this, so it's probably more of a starting point that you'd need to do
 a bunch more work on.
 
 7) \*/R/NPDE_unfinished/ - NPDEs using the npde package. I've spent very little
-time on this, so I'm not even sure it can count as a starting point.
+time on this, so I'm not even sure it can count as a starting point. 
