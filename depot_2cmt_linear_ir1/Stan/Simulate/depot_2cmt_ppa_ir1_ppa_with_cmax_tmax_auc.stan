@@ -5,7 +5,6 @@
 //   fixed to be 1
 // proportional plus additive error for PK - DV = IPRED*(1 + eps_p) + eps_a
 // proportional plus additive error for PD - DV = IPRED*(1 + eps_p_pd) + eps_a_pd
-// Users choice of general or coupled ODE solution using Torsten
 // Observations are generated from a normal that is truncated below at 0
 // Since we have a normal distribution on the error, but the DV must be > 0, it
 //   generates values from a normal that is truncated below at 0

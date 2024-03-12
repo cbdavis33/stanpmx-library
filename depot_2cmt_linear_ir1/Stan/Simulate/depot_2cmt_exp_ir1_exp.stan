@@ -250,22 +250,36 @@ generated quantities{
       }
     
     }
-
+    
     for(i in 1:n_total){
       if(ipred[i] == 0){
          dv[i] = 0;
       }else{
-        if(cmt[i] == 2){
-          
-          dv[i] = lognormal_rng(log(ipred[i]), sigma);
-          
-        }else if(cmt[i] == 4){
-          
-          dv[i] = lognormal_rng(log(ipred[i]), sigma_pd);
-          
+        
+        if(cmt[i] == 2 || cmt[i] == 4){
+          real sigma_tmp = cmt[i] == 2 ? sigma : sigma_pd;
+
+          dv[i] = lognormal_rng(log(ipred[i]), sigma_tmp);
         }
+
       }
     }
+
+    // for(i in 1:n_total){
+    //   if(ipred[i] == 0){
+    //      dv[i] = 0;
+    //   }else{
+    //     if(cmt[i] == 2){
+    // 
+    //       dv[i] = lognormal_rng(log(ipred[i]), sigma);
+    // 
+    //     }else if(cmt[i] == 4){
+    // 
+    //       dv[i] = lognormal_rng(log(ipred[i]), sigma_pd);
+    // 
+    //     }
+    //   }
+    // }
   }
 }
 

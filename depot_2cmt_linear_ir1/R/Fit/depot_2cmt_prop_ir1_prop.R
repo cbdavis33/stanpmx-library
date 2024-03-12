@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
+# library(trelliscopejs)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
@@ -70,10 +70,10 @@ p_pk +
   plot_layout(guides = 'collect') &
   theme(legend.position = "bottom")
 
-p_pk +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-p_pd +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p_pk +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p_pd +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -146,14 +146,13 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ic50 = 0.4,
                   lkj_df_omega_pd = 2,
                   scale_sigma_p_pd = 0.5,
-                  prior_only = 0,
-                  solver = 1) # 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf
+                  prior_only = 0)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_prop_ir1_prop_all_solvers.stan",
+  "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_prop_ir1_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit_rk45 <- model$sample(
+fit <- model$sample(
   data = stan_data,
   seed = 11235,
   chains = 4,
@@ -162,7 +161,7 @@ fit_rk45 <- model$sample(
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.8,
-  refresh = 500,
+  refresh = 100,
   max_treedepth = 10,
   init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                          TVVC = rlnorm(1, log(18), 0.3),
@@ -177,91 +176,5 @@ fit_rk45 <- model$sample(
                          omega_pd = rlnorm(3, log(0.35), 0.3),
                          sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
 
-fit_rk45$save_object("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop_rk45.rds")
-
-
-stan_data$solver <- 2
-fit_rk45_coupled <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_rk45_coupled$save_object(
-  "depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop_rk45_coupled.rds")
-
-
-stan_data$solver <- 3
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf$save_object(
-  "depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop_bdf.rds")
-
-stan_data$solver <- 4
-fit_bdf_coupled <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf_coupled$save_object(
-  "depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop_bdf_coupled.rds")
+fit$save_object("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop.rds")
 
