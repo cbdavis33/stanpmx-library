@@ -7,7 +7,7 @@ Michaelis-Menten elimination, indirect response models (eventually), the
 Friberg-Karlsson model (eventually), the Savic transit compartment absorption
 model, models with covariates, BLOQ-handling, exposure-response analyses, etc. ….
 [bayespmx.github.io](https://bayespmx.github.io) (incomplete and in the early stages,
-but updated periodically) and [https://stanpmx.github.io](stanpmx.github.io) 
+but updated periodically) and [stanpmx.github.io](https://stanpmx.github.io) 
 (no longer maintained) provide some tutorials and guidance. I
 believe that making these models public along with some tutorials
 will give users in the PMx community enough of a knowledge platform and
