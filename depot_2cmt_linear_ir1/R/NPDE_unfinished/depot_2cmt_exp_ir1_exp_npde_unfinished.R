@@ -25,8 +25,7 @@ nonmem_data <- read_csv(
 
 new_data <- nonmem_data %>% 
   arrange(ID, time, evid, cmt) %>% 
-  distinct(ID, time, cmt, .keep_all = TRUE) %>% 
-  select(-DV)
+  distinct(ID, time, evid, cmt, .keep_all = TRUE) 
 
 n_subjects <- new_data %>%  # number of individuals
   distinct(ID) %>% 
@@ -80,13 +79,13 @@ ipreds_col <- preds_df %>%
   filter(evid == 0) %>% 
   select(ID, time, cmt, ipred_mean)
 
-obs <- nonmem_data %>% 
+obs <- new_data %>% 
   select(ID, time, dv = "DV", cmt, amt, evid, bloq, mdv) %>% 
-  filter(evid == 0) %>% 
   mutate(dv = case_when(bloq == 1 & cmt == 2 ~ 1,
                         bloq == 1 & cmt == 4 ~ 2,
                         TRUE ~ dv)) %>% 
-  left_join(ipreds_col, by = c("ID", "time", "cmt"))
+  left_join(ipreds_col, by = c("ID", "time", "cmt")) %>% 
+  filter(evid == 0) 
 
 sim <- preds_df %>%
   spread_draws(c(ipred, dv)[i]) %>% 
@@ -134,10 +133,10 @@ plot(my_npde_pk, plot.type = "vpc",
 
 
 my_npde_pd <- autonpde(namobs = obs %>% 
-                         filter(cmt == 2) %>% 
+                         filter(cmt == 4) %>% 
                          select(ID, time, dv, bloq, ipred_mean),
                        namsim = sim %>% 
-                         filter(cmt == 2) %>% 
+                         filter(cmt == 4) %>% 
                          select(-cmt), 
                        iid = "ID", ix = "time", iy = "dv", icens = "bloq",
                        iipred = "ipred_mean",
@@ -151,11 +150,11 @@ my_npde_pd@results@res %>%
   theme_bw()
 
 plot(my_npde_pd, plot.type = "data", 
-     xlab = "Time (hr)", ylab = "Drug Conc. (ug/mL)", 
+     xlab = "Time (hr)", ylab = "Response (units)", 
      line.loq = TRUE, ylim = c(0, NA), 
      main = "LOQ imputed to individual prediction")
 
 plot(my_npde_pd, plot.type = "vpc", 
-     xlab = "Time (hr)", ylab = "Drug Conc. (ug/mL)", 
+     xlab = "Time (hr)", ylab = "Response (units)", 
      line.loq = TRUE, ylim = c(0, NA), 
      main = "VPC")
