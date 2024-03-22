@@ -199,7 +199,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   filter(!is.na(DV), CMT == 2) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
                                                 CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
@@ -219,13 +219,13 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   filter(!is.na(DV), CMT == 4) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
                                                 CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Response (unit)"),
-                       trans = "log10") + 
+    scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                       trans = "identity") + 
     scale_x_continuous(name = "Time (w)",
                        breaks = seq(0, max(data$TIME[data$CMT == 4]), by = 168),
                        labels = seq(0, max(data$TIME[data$CMT == 4])/168, 

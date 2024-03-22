@@ -1,34 +1,29 @@
 // First Order Absorption (oral/subcutaneous)
 // Two-compartment PK Model with Indirect Response 1 PD Model
 // IIV on CL, VC, Q, VP, and KA (full covariance matrix)
-// IIV on KIN, KOUT, IC50 (full covariance matrix) for PD. IMAX and HILL are 
-//   fixed to be 1
+// IIV on MTT, CIRC0, GAMMA, ALPHA (full covariance matrix) for PD
 // exponential error for PK - DV = IPRED*exp(eps)
 // exponential error for PD - DV = IPRED*exp(eps_pd)
-// Users choice of general or coupled ODE solution using Torsten
+// General ODE solution using Torsten
 // PK output includes individual Cmax over the whole time period, Tmax between 
 //   t1 and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like 
 //   a dosing interval)
-// PD output includes individual Rmin (response decreases to a min), and Tmin
-//   betweem t1 and t2 (like the time within a dosing interval at which the 
-//   minimum is reached)
+// PD output includes individual Rmin (neutrophils decrease to a min)
 
 functions{
   
-  vector depot_2cmt_ir1_ode(real t, vector y, array[] real params, 
-                            array[] real x_r, array[] int x_i){
+  vector depot_2cmt_friberg_ode(real t, vector y, array[] real params, 
+                                array[] real x_r, array[] int x_i){
     
     real cl = params[1];
     real vc = params[2];
     real q = params[3];
     real vp = params[4];
     real ka = params[5];
-    real kin = params[6];
-    real kout = params[7];
-    real ic50 = params[8];
-    real imax = params[9];   // It's fixed to 1 in this particular model
-    real hill = params[10];  // It's fixed to 1 in this particular model
-    real r_0 = params[11];
+    real mtt = params[6];
+    real circ_0 = params[7];
+    real gamma = params[8];
+    real alpha = params[9];
     
     real t_1 = x_r[1];
     real t_2 = x_r[2];
@@ -36,32 +31,39 @@ functions{
     real ke = cl/vc;
     real k_cp = q/vc;
     real k_pc = q/vp;
+    real k_tr = 4/mtt; // k_tr = (n_tr + 1)/mtt    
     
     real conc = y[2]/vc;
     
-    real inh = (imax*pow(conc, hill))/(pow(ic50, hill) + pow(conc, hill));
-    real response = y[4] + r_0;
+    real e_drug = fmin(1.0, alpha*conc); // Maybe reparameterize this so no more fmin?
+    real prol = y[4] + circ_0;
+    real transit_1 = y[5] + circ_0; 
+    real transit_2 = y[6] + circ_0;
+    real transit_3 = y[7] + circ_0;
+    real circ = y[8] + circ_0; // fmax(machine_precision(), y[8] + circ_0)
     
     real slope_pk = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3];
-    real x_pk = slope_pk > 0 && conc > y[7] ? slope_pk/vc : 0;
+    real x_pk = slope_pk > 0 && conc > y[11] ? slope_pk/vc : 0;
     real z_pk = t <= t_1 || (slope_pk > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
-    real slope_pd = kin*(1 - inh) - kout*response;
-    real x_pd = slope_pd < 0 && y[4] < y[9] ? slope_pd : 0;
-    real z_pd = t <= t_1 || (slope_pd < 0 && t >= t_1 && t <= t_2) ? 1 : 0;
+    real slope_pd = k_tr*(transit_3 - circ);
+    real x_pd = slope_pd < 0 && y[8] < y[13] ? slope_pd : 0;
     
-    vector[10] dydt;
-
-    dydt[1] = -ka*y[1];
-    dydt[2] = slope_pk;
-    dydt[3] = k_cp*y[2] - k_pc*y[3];
-    dydt[4] = slope_pd;
-    dydt[5] = y[2];                                // AUC
-    dydt[6] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
-    dydt[7] = x_pk;                                // C_max 
-    dydt[8] = z_pk;                                // t_max for PK
-    dydt[9] = x_pd;                                // R_min
-    dydt[10] = z_pd;                               // t_min for PD
+    vector[13] dydt;
+    
+    dydt[1] = -ka*y[1];                               // depot
+    dydt[2] = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3]; // central
+    dydt[3] = k_cp*y[2] - k_pc*y[3];                  // peripheral
+    dydt[4] = k_tr*prol*((1 - e_drug)*(circ_0/circ)^gamma - 1);  // proliferative cells
+    dydt[5] = k_tr*(prol - transit_1);                // transit 1
+    dydt[6] = k_tr*(transit_1 - transit_2);           // transit 2
+    dydt[7] = k_tr*(transit_2 - transit_3);           // transit 3
+    dydt[8] = slope_pd;                               // circulating blood cells
+    dydt[9] = y[2];                                   // AUC
+    dydt[10] = t >= t_1 && t <= t_2 ? y[2] : 0;       // AUC_t_1-t_2
+    dydt[11] = x_pk;                                  // C_max 
+    dydt[12] = z_pk;                                  // t_max for PK
+    dydt[13] = x_pd;                                  // R_min
     
     return dydt;
   }
@@ -96,13 +98,15 @@ data{
   real<lower = 0> omega_vp;
   real<lower = 0> omega_ka;
   
-  real<lower = 0> TVKIN;
-  real<lower = 0> TVKOUT;
-  real<lower = 0> TVIC50;
+  real<lower = 0> TVMTT;
+  real<lower = 0> TVCIRC0;
+  real<lower = 0> TVGAMMA;
+  real<lower = 0> TVALPHA;
   
-  real<lower = 0> omega_kin;
-  real<lower = 0> omega_kout;
-  real<lower = 0> omega_ic50;
+  real<lower = 0> omega_mtt;
+  real<lower = 0> omega_circ0;
+  real<lower = 0> omega_gamma;
+  real<lower = 0> omega_alpha;
   
   corr_matrix[5] R;     // Correlation matrix before transforming to Omega.
                         // Can in theory change this to having inputs for
@@ -110,11 +114,11 @@ data{
                         // correlation matrix in transformed data, but it's easy
                         // enough to do in R
                         
-  corr_matrix[3] R_pd;  // Correlation matrix before transforming to Omega.
+  corr_matrix[4] R_pd;  // Correlation matrix before transforming to Omega.
                         // Can in theory change this to having inputs for
-                        // cor_kin_kout, cor_kin_ic50, ... and then construct the 
-                        // correlation matrix in transformed data, but it's easy
-                        // enough to do in R
+                        // cor_mtt_circ0, cor_mtt_gamma, ... and then construct 
+                        // the correlation matrix in transformed data, but it's 
+                        // easy enough to do in R
   
   real<lower = 0> sigma;
   real<lower = 0> sigma_pd;
@@ -126,15 +130,16 @@ data{
 transformed data{
   
   int n_random = 5;
-  int n_random_pd = 3;
+  int n_random_pd = 4;
   
   int n_cmt = 3;       // number of ODEs in PK model (depot, central, peripheral)
-  int n_cmt_pd = 1;    // number of ODEs in PD system
-  int n_cmt_extra = 6; // number of ODEs for AUC, Tmax, Rmin, ...
+  int n_cmt_pd = 5;    // number of ODEs in PD system
+  int n_cmt_extra = 5; // number of ODEs for AUC, Tmax, Rmin, ...
 
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka]';
                                
-  vector[n_random_pd] omega_pd = [omega_kin, omega_kout, omega_ic50]';
+  vector[n_random_pd] omega_pd = [omega_mtt, omega_circ0, omega_gamma, 
+                                  omega_alpha]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
   
@@ -144,9 +149,6 @@ transformed data{
                                  rep_array(1.0, n_cmt + n_cmt_pd + n_cmt_extra); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt + n_cmt_pd + n_cmt_extra] real tlag = 
                                  rep_array(0.0, n_cmt + n_cmt_pd + n_cmt_extra);  // Hardcoding, but could be data or a parameter in another situation
-  
-  real imax = 1.0;
-  real hill = 1.0;
   
   array[1, 2] real x_r = {{t_1, t_2}};
   
@@ -166,7 +168,6 @@ generated quantities{
   vector[n_subjects] t_half_alpha;    // alpha half-life
   vector[n_subjects] t_half_terminal; // terminal half-life
   vector[n_subjects] r_min;       // Minimum response
-  vector[n_subjects] t_min;       // Tmin for PD
   
   vector[n_subjects] CL;
   vector[n_subjects] VC;
@@ -174,9 +175,10 @@ generated quantities{
   vector[n_subjects] VP;
   vector[n_subjects] KA;
   
-  vector[n_subjects] KIN;
-  vector[n_subjects] KOUT;
-  vector[n_subjects] IC50;
+  vector[n_subjects] MTT;
+  vector[n_subjects] CIRC0;
+  vector[n_subjects] GAMMA;
+  vector[n_subjects] ALPHA;
   
   {
   
@@ -186,15 +188,14 @@ generated quantities{
     matrix[n_subjects, n_random] eta;   
     matrix[n_subjects, n_random] theta; 
     
-    row_vector[n_random_pd] typical_values_pd = to_row_vector({TVKIN, TVKOUT, 
-                                                               TVIC50});
+    row_vector[n_random_pd] typical_values_pd = to_row_vector({TVMTT, TVCIRC0, 
+                                                               TVGAMMA, TVALPHA});
     
     matrix[n_subjects, n_random_pd] eta_pd;   
     matrix[n_subjects, n_random_pd] theta_pd; 
   
     matrix[n_total, n_cmt + n_cmt_pd + n_cmt_extra] x_ipred;
-    
-    vector[n_subjects] r_0;
+
     vector[n_subjects] alpha;
     vector[n_subjects] beta;
     
@@ -214,11 +215,11 @@ generated quantities{
     VP = col(theta, 4);
     KA = col(theta, 5);
     
-    KIN = col(theta_pd, 1);
-    KOUT = col(theta_pd, 2);
-    IC50 = col(theta_pd, 3);
+    MTT = col(theta_pd, 1);
+    CIRC0 = col(theta_pd, 2);
+    GAMMA = col(theta_pd, 3);
+    ALPHA = col(theta_pd, 4);
     
-    r_0 = KIN ./ KOUT; 
     alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
                  sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
     beta = 0.5*(CL./VC + Q./VC + Q./VP - 
@@ -227,7 +228,7 @@ generated quantities{
     for(j in 1:n_subjects){
 
       x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(depot_2cmt_ir1_ode,
+        pmx_solve_rk45(depot_2cmt_friberg_ode,
                        n_cmt + n_cmt_pd + n_cmt_extra,
                        time[subj_start[j]:subj_end[j]],
                        amt[subj_start[j]:subj_end[j]],
@@ -238,42 +239,39 @@ generated quantities{
                        addl[subj_start[j]:subj_end[j]],
                        ss[subj_start[j]:subj_end[j]],
                        {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                        KIN[j], KOUT[j], IC50[j], imax, hill, r_0[j]},
+                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]},
                        bioav, tlag, x_r)';
 
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           ipred[k] = x_ipred[k, 2] / VC[j];
         }else if(cmt[k] == 4){
-          ipred[k] = x_ipred[k, 4] + r_0[j];
+          ipred[k] = x_ipred[k, 8] + CIRC0[j];
         }
-        auc[k] = x_ipred[k, 5] / VC[j];
+        auc[k] = x_ipred[k, 9] / VC[j];
       }
-      
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 8]) - t_1;
+
+      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 10]) / VC[j];
+      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 11]);
+      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 12]) - t_1;
       t_half_alpha[j] = log(2)/alpha[j];
       t_half_terminal[j] = log(2)/beta[j];
       
-      r_min[j] = min(x_ipred[subj_start[j]:subj_end[j], 9]) + r_0[j];
-      t_min[j] = max(x_ipred[subj_start[j]:subj_end[j], 10]) - t_1;
+      r_min[j] = min(x_ipred[subj_start[j]:subj_end[j], 13]) + CIRC0[j];
       
     }
     
-
     for(i in 1:n_total){
       if(ipred[i] == 0){
          dv[i] = 0;
       }else{
-        if(cmt[i] == 2){
-          
-          dv[i] = lognormal_rng(log(ipred[i]), sigma);
-          
-        }else if(cmt[i] == 4){
-          
-          dv[i] = lognormal_rng(log(ipred[i]), sigma_pd);
-          
+
+        if(cmt[i] == 2 || cmt[i] == 4){
+          real log_ipred_tmp = log(ipred[i]);
+          real sigma_tmp = cmt[i] == 2 ? sigma : sigma_pd;
+
+          dv[i] = lognormal_rng(log_ipred_tmp, sigma_tmp);
+
         }
       }
     }

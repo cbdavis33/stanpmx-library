@@ -39,12 +39,12 @@ R_pd <- diag(rep(1, times = 4))
 R_pd[1, 2] <- R_pd[2, 1] <- 0.7 # Put in some correlation between MTT and CIRC0
 
 sigma_p <- 0.2
-sigma_a <- 5 # LLOQ = 10 
+sigma_a <- 0 # 5 # LLOQ = 10 
 
 cor_p_a <- 0
 
 sigma_p_pd <- 0.15
-sigma_a_pd <- 0.5 # LLOQ = 1
+sigma_a_pd <- 0 # 0.5 # LLOQ = 1
 
 cor_p_a_pd <- 0
 
@@ -159,7 +159,7 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma_p_pd = sigma_p_pd,
                   sigma_a_pd = sigma_a_pd,
                   cor_p_a_pd = cor_p_a_pd,
-                  solver = 2) # General ODE = 1, Coupled ODE = 2
+                  solver = 1) # General ODE = 1, Coupled ODE = 2
 
 model <- cmdstan_model(
   "depot_2cmt_linear_friberg/Stan/Simulate/depot_2cmt_ppa_friberg_ppa.stan") 
@@ -207,7 +207,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   filter(!is.na(DV), CMT == 2) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
                                                 CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
@@ -227,13 +227,13 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   filter(!is.na(DV), CMT == 4) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
                                                 CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Response (unit)"),
-                       trans = "log10") + 
+    scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                       trans = "identity") + 
     scale_x_continuous(name = "Time (w)",
                        breaks = seq(0, max(data$TIME[data$CMT == 4]), by = 168),
                        labels = seq(0, max(data$TIME[data$CMT == 4])/168, 
@@ -248,11 +248,11 @@ p_pk +
 
 data %>%
   select(-IPRED) %>% 
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv", na = ".")
-  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv", na = ".")
+  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv", na = ".")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv", na = ".")
 
 params_ind %>%
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa_params_ind.csv")
-  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop_params_ind.csv")
+  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa_params_ind.csv")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop_params_ind.csv")
 
 

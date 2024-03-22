@@ -1,8 +1,7 @@
 // First Order Absorption (oral/subcutaneous)
 // Two-compartment PK Model
 // IIV on CL, VC, Q, VP, and KA (full covariance matrix)
-// IIV on KIN, KOUT, IC50 (full covariance matrix) for PD. IMAX and HILL are 
-//   fixed to be 1
+// IIV on MTT, CIRC0, GAMMA, ALPHA (full covariance matrix) for PD
 // proportional error on PK - DV = IPRED*(1 + eps_p)
 // proportional error on PD - DV = IPRED*(1 + eps_p_pd)
 // Users choice of general or coupled ODE solution using Torsten
@@ -69,61 +68,74 @@ functions{
 
   }
   
-  vector depot_2cmt_ir1_ode(real t, vector y, array[] real params, 
-                            array[] real x_r, array[] int x_i){
+  vector depot_2cmt_friberg_ode(real t, vector y, array[] real params, 
+                                array[] real x_r, array[] int x_i){
     
     real cl = params[1];
     real vc = params[2];
     real q = params[3];
     real vp = params[4];
     real ka = params[5];
-    real kin = params[6];
-    real kout = params[7];
-    real ic50 = params[8];
-    real imax = params[9];   // It's fixed to 1 in this particular model
-    real hill = params[10];  // It's fixed to 1 in this particular model
-    real r_0 = params[11];
+    real mtt = params[6];
+    real circ_0 = params[7];
+    real gamma = params[8];
+    real alpha = params[9];
     
     real ke = cl/vc;
     real k_cp = q/vc;
     real k_pc = q/vp;
+    real k_tr = 4/mtt; // k_tr = (n_tr + 1)/mtt    
     
     real conc = y[2]/vc;
     
-    real inh = (imax*pow(conc, hill))/(pow(ic50, hill) + pow(conc, hill));
-    real response = y[4] + r_0;
+    real e_drug = fmin(1.0, alpha*conc); // Maybe reparameterize this so no more fmin?
+    real prol = y[4] + circ_0;
+    real transit_1 = y[5] + circ_0; 
+    real transit_2 = y[6] + circ_0;
+    real transit_3 = y[7] + circ_0;
+    real circ = y[8] + circ_0; // fmax(machine_precision(), y[8] + circ_0)
     
-    vector[4] dydt;
-
-    dydt[1] = -ka*y[1];
-    dydt[2] = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3];
-    dydt[3] = k_cp*y[2] - k_pc*y[3];
-    dydt[4] = kin*(1 - inh) - kout*response;
+    vector[8] dydt;
+    
+    dydt[1] = -ka*y[1];                               // depot
+    dydt[2] = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3]; // central
+    dydt[3] = k_cp*y[2] - k_pc*y[3];                  // peripheral
+    dydt[4] = k_tr*prol*((1 - e_drug)*(circ_0/circ)^gamma - 1);  // proliferative cells
+    dydt[5] = k_tr*(prol - transit_1);                // transit 1
+    dydt[6] = k_tr*(transit_1 - transit_2);           // transit 2
+    dydt[7] = k_tr*(transit_2 - transit_3);           // transit 3
+    dydt[8] = k_tr*(transit_3 - circ);                // circulating blood cells
     
     return dydt;
   }
   
-  vector depot_2cmt_ir1_ode_coupled(real t, vector y, vector y_pk, 
-                                    array[] real params, array[] real x_r, 
-                                    array[] int x_i){
+  vector depot_2cmt_friberg_ode_coupled(real t, vector y, vector y_pk,
+                                        array[] real params, array[] real x_r, 
+                                        array[] int x_i){
     
     real vc = params[3];
-
-    real kin = params[6];
-    real kout = params[7];
-    real ic50 = params[8];
-    real imax = params[9];   // It's fixed to 1 in this particular model
-    real hill = params[10];  // It's fixed to 1 in this particular model
-    real r_0 = params[11];
+    real mtt = params[6];
+    real circ_0 = params[7];
+    real gamma = params[8];
+    real alpha = params[9];
     
     real conc = y_pk[2]/vc;
     
-    real inh = (imax*pow(conc, hill))/(pow(ic50, hill) + pow(conc, hill));
-    real response = y[1] + r_0;
+    real k_tr = 4/mtt; // k_tr = (n_tr + 1)/mtt    
+    real e_drug = fmin(1.0, alpha*conc); // Maybe reparameterize this so no more fmin?
+    real prol = y[1] + circ_0;
+    real transit_1 = y[2] + circ_0; 
+    real transit_2 = y[3] + circ_0;
+    real transit_3 = y[4] + circ_0;
+    real circ = y[5] + circ_0; 
     
-    vector[1] dydt;
-
-    dydt[1] = kin*(1 - inh) - kout*response;
+    vector[5] dydt;
+    
+    dydt[1] = k_tr*prol*((1 - e_drug)*(circ_0/circ)^gamma - 1);  // proliferative cells
+    dydt[2] = k_tr*(prol - transit_1);                // transit 1
+    dydt[3] = k_tr*(transit_1 - transit_2);           // transit 2
+    dydt[4] = k_tr*(transit_2 - transit_3);           // transit 3
+    dydt[5] = k_tr*(transit_3 - circ);                // circulating blood cells
     
     return dydt;
   }
@@ -135,8 +147,7 @@ functions{
                         array[] int addl, array[] int ss,
                         array[] int subj_start, array[] int subj_end, 
                         vector CL, vector VC, vector Q, vector VP, vector KA, 
-                        vector KIN, vector KOUT, vector IC50, 
-                        vector IMAX, vector HILL,
+                        vector MTT, vector CIRC0, vector GAMMA, vector ALPHA,
                         real sigma_p, real sigma_p_pd,
                         vector lloq, array[] int bloq,
                         int n_random, int n_random_pd, 
@@ -168,12 +179,11 @@ functions{
     for(n in 1:N){            // loop over subjects in this slice
     
       int j = n + start - 1; // j is the ID of the current subject
-      real r_0 = KIN[j]/KOUT[j];
       
       if(solver == 1){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_ir1_ode,
+          pmx_solve_rk45(depot_2cmt_friberg_ode,
                          n_cmt + n_cmt_pd,
                          time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
@@ -184,12 +194,12 @@ functions{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                          KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
+                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
           
       }else if(solver == 2){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
                                 n_cmt_pd,
                                 time[subj_start[j]:subj_end[j]],
                                 amt[subj_start[j]:subj_end[j]],
@@ -200,13 +210,13 @@ functions{
                                 addl[subj_start[j]:subj_end[j]],
                                 ss[subj_start[j]:subj_end[j]],
                                 {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                 KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0}, 
+                                 MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
                                 bioav, tlag)';
                            
       }else if(solver == 3){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_ir1_ode,
+          pmx_solve_bdf(depot_2cmt_friberg_ode,
                         n_cmt + n_cmt_pd,
                         time[subj_start[j]:subj_end[j]],
                         amt[subj_start[j]:subj_end[j]],
@@ -217,12 +227,12 @@ functions{
                         addl[subj_start[j]:subj_end[j]],
                         ss[subj_start[j]:subj_end[j]],
                         {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                        KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
+                         MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
                          
       }else{
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
                                n_cmt_pd,
                                time[subj_start[j]:subj_end[j]],
                                amt[subj_start[j]:subj_end[j]],
@@ -233,7 +243,7 @@ functions{
                                addl[subj_start[j]:subj_end[j]],
                                ss[subj_start[j]:subj_end[j]],
                                {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0}, 
+                                MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
                                bioav, tlag)';
         
       }
@@ -242,7 +252,7 @@ functions{
         if(cmt[k] == 2){
           dv_ipred[k] = x_ipred[k, 2] / VC[j];
         }else if(cmt[k] == 4){
-          dv_ipred[k] = x_ipred[k, 4] + r_0;
+          dv_ipred[k] = x_ipred[k, 8] + CIRC0[j];
         }
       }
     
@@ -324,17 +334,20 @@ data{
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
   
-  real<lower = 0> location_tvkin;  // Prior Location parameter for KIN
-  real<lower = 0> location_tvkout; // Prior Location parameter for KOUT
-  real<lower = 0> location_tvic50; // Prior Location parameter for IC50
+  real<lower = 0> location_tvmtt;   // Prior Location parameter for MTT
+  real<lower = 0> location_tvcirc0; // Prior Location parameter for CIRC0
+  real<lower = 0> location_tvgamma; // Prior Location parameter for GAMMA
+  real<lower = 0> location_tvalpha; // Prior Location parameter for ALPHA
   
-  real<lower = 0> scale_tvkin;     // Prior Scale parameter for KIN
-  real<lower = 0> scale_tvkout;    // Prior Scale parameter for KOUT
-  real<lower = 0> scale_tvic50;    // Prior Scale parameter for IC50
+  real<lower = 0> scale_tvmtt;      // Prior Scale parameter for MTT
+  real<lower = 0> scale_tvcirc0;    // Prior Scale parameter for CIRC0
+  real<lower = 0> scale_tvgamma;    // Prior Scale parameter for GAMMA
+  real<lower = 0> scale_tvalpha;    // Prior Scale parameter for ALPHA
   
-  real<lower = 0> scale_omega_kin;  // Prior scale parameter for omega_kin
-  real<lower = 0> scale_omega_kout; // Prior scale parameter for omega_kout
-  real<lower = 0> scale_omega_ic50; // Prior scale parameter for omega_ic50
+  real<lower = 0> scale_omega_mtt;   // Prior scale parameter for omega_mtt
+  real<lower = 0> scale_omega_circ0; // Prior scale parameter for omega_circ0
+  real<lower = 0> scale_omega_gamma; // Prior scale parameter for omega_gamma
+  real<lower = 0> scale_omega_alpha; // Prior scale parameter for omega_alpha
   
   real<lower = 0> lkj_df_omega_pd;  // Prior degrees of freedom for omega_pd cor mat
   
@@ -356,29 +369,22 @@ transformed data{
   array[n_obs] int bloq_obs = bloq[i_obs];
   
   int n_random = 5;
-  int n_random_pd = 3;
+  int n_random_pd = 4;
   
   int n_cmt = 3;     // number of ODEs in PK model (depot, central, peripheral)
-  int n_cmt_pd = 1;  // number of ODEs in PD system
+  int n_cmt_pd = 5;  // number of ODEs in PD system
   
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_q, scale_omega_vp,
                                       scale_omega_ka};
                                       
-  array[n_random_pd] real scale_omega_pd = {scale_omega_kin, scale_omega_kout, 
-                                            scale_omega_ic50};
+  array[n_random_pd] real scale_omega_pd = {scale_omega_mtt, scale_omega_circ0, 
+                                            scale_omega_gamma, scale_omega_alpha};
   
   array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt + n_cmt_pd] real bioav = rep_array(1.0, n_cmt + n_cmt_pd); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt + n_cmt_pd] real tlag = rep_array(0.0, n_cmt + n_cmt_pd);
-  
-  real TVIMAX = 1.0;
-  real TVHILL = 1.0;
-  vector<lower = 0>[n_subjects] IMAX = rep_vector(TVIMAX, n_subjects); // IMAX and HILL are both fixed to 1.0 in this model,
-  vector<lower = 0>[n_subjects] HILL = rep_vector(TVHILL, n_subjects); // but it could be data or a parameter in another model.
-                                                                       // Putting this here will require the least amount of 
-                                                                       // changesin the code if that change is made
   
 }
 parameters{ 
@@ -397,9 +403,10 @@ parameters{
   
   matrix[n_random, n_subjects] Z;
   
-  real<lower = 0> TVKIN;       
-  real<lower = 0> TVKOUT; 
-  real<lower = 0> TVIC50;
+  real<lower = 0> TVMTT;       
+  real<lower = 0> TVCIRC0; 
+  real<lower = 0> TVGAMMA;
+  real<lower = 0> TVALPHA;
   
   vector<lower = 0>[n_random_pd] omega_pd;
   cholesky_factor_corr[n_random_pd] L_pd;
@@ -422,12 +429,14 @@ transformed parameters{
   vector[n_subjects] VP;
   vector[n_subjects] KA;
   
-  vector[n_subjects] eta_kin;
-  vector[n_subjects] eta_kout;
-  vector[n_subjects] eta_ic50;
-  vector[n_subjects] KIN;
-  vector[n_subjects] KOUT;
-  vector[n_subjects] IC50;
+  vector[n_subjects] eta_mtt;
+  vector[n_subjects] eta_circ0;
+  vector[n_subjects] eta_gamma;
+  vector[n_subjects] eta_alpha;
+  vector[n_subjects] MTT;
+  vector[n_subjects] CIRC0;
+  vector[n_subjects] GAMMA;
+  vector[n_subjects] ALPHA;
 
   {
     
@@ -438,8 +447,8 @@ transformed parameters{
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
     
-    row_vector[n_random_pd] typical_values_pd = to_row_vector({TVKIN, TVKOUT, 
-                                                               TVIC50});
+    row_vector[n_random_pd] typical_values_pd = to_row_vector({TVMTT, TVCIRC0, 
+                                                               TVGAMMA, TVALPHA});
     
     matrix[n_subjects, n_random_pd] eta_pd = 
                                       diag_pre_multiply(omega_pd, L_pd * Z_pd)';  
@@ -457,12 +466,14 @@ transformed parameters{
     VP = col(theta, 4);
     KA = col(theta, 5);
   
-    eta_kin = col(eta_pd, 1);
-    eta_kout = col(eta_pd, 2);
-    eta_ic50 = col(eta_pd, 3);
-    KIN = col(theta_pd, 1);
-    KOUT = col(theta_pd, 2);
-    IC50 = col(theta_pd, 3);
+    eta_mtt = col(eta_pd, 1);
+    eta_circ0 = col(eta_pd, 2);
+    eta_gamma = col(eta_pd, 3);
+    eta_alpha = col(eta_pd, 4);
+    MTT = col(theta_pd, 1);
+    CIRC0 = col(theta_pd, 2);
+    GAMMA = col(theta_pd, 3);
+    ALPHA = col(theta_pd, 4);
     
   }
   
@@ -484,9 +495,10 @@ model{
   
   to_vector(Z) ~ std_normal();
   
-  TVKIN ~ lognormal(log(location_tvkin), scale_tvkin);
-  TVKOUT ~ lognormal(log(location_tvkout), scale_tvkout);
-  TVIC50 ~ lognormal(log(location_tvic50), scale_tvic50);
+  TVMTT ~ lognormal(log(location_tvmtt), scale_tvmtt);
+  TVCIRC0 ~ lognormal(log(location_tvcirc0), scale_tvcirc0);
+  TVGAMMA ~ lognormal(log(location_tvgamma), scale_tvgamma);
+  TVALPHA ~ lognormal(log(location_tvalpha), scale_tvalpha);
 
   omega_pd ~ normal(0, scale_omega_pd);
   L_pd ~ lkj_corr_cholesky(lkj_df_omega_pd);
@@ -502,7 +514,7 @@ model{
                          amt, cmt, evid, time, 
                          rate, ii, addl, ss, subj_start, subj_end, 
                          CL, VC, Q, VP, KA,
-                         KIN, KOUT, IC50, IMAX, HILL,
+                         MTT, CIRC0, GAMMA, ALPHA,
                          sigma_p, sigma_p_pd,
                          lloq, bloq,
                          n_random, n_random_pd, n_subjects, n_total,
@@ -548,22 +560,30 @@ generated quantities{
   real omega_q_ka;
   real omega_vp_ka;
   
-  real<lower = 0> omega_kin = omega_pd[1];
-  real<lower = 0> omega_kout = omega_pd[2];
-  real<lower = 0> omega_ic50 = omega_pd[3];
+  real<lower = 0> omega_mtt = omega_pd[1];
+  real<lower = 0> omega_circ0 = omega_pd[2];
+  real<lower = 0> omega_gamma = omega_pd[3];
+  real<lower = 0> omega_alpha = omega_pd[4];
 
-  real<lower = 0> omega_sq_kin = square(omega_kin);
-  real<lower = 0> omega_sq_kout = square(omega_kout);
-  real<lower = 0> omega_sq_ic50 = square(omega_ic50);
+  real<lower = 0> omega_sq_mtt = square(omega_mtt);
+  real<lower = 0> omega_sq_circ0 = square(omega_circ0);
+  real<lower = 0> omega_sq_gamma = square(omega_gamma);
+  real<lower = 0> omega_sq_alpha = square(omega_alpha);
 
-  real cor_kin_kout;
-  real cor_kin_ic50;
-  real cor_kout_ic50;
+  real cor_mtt_circ0;
+  real cor_mtt_gamma;
+  real cor_mtt_alpha;
+  real cor_circ0_gamma;
+  real cor_circ0_alpha;
+  real cor_gamma_alpha;
   
-  real omega_kin_kout;
-  real omega_kin_ic50;
-  real omega_kout_ic50;
-
+  real omega_mtt_circ0;
+  real omega_mtt_gamma;
+  real omega_mtt_alpha;
+  real omega_circ0_gamma;
+  real omega_circ0_alpha;
+  real omega_gamma_alpha;
+  
   vector[n_obs] ipred;
   vector[n_obs] pred;
   vector[n_obs] dv_ppc;
@@ -587,8 +607,6 @@ generated quantities{
     vector[n_total] dv_ipred;
     matrix[n_total, n_cmt + n_cmt_pd] x_ipred;
     
-    real TVR0 = TVKIN/TVKOUT;
-
     cor_cl_vc = R[1, 2];
     cor_cl_q = R[1, 3];
     cor_cl_vp = R[1, 4];
@@ -611,22 +629,26 @@ generated quantities{
     omega_q_ka = Omega[3, 5];
     omega_vp_ka = Omega[4, 5];
     
-    cor_kin_kout = R_pd[1, 2];
-    cor_kin_ic50 = R_pd[1, 3];
-    cor_kout_ic50 = R_pd[2, 3];
+    cor_mtt_circ0 = R_pd[1, 2];
+    cor_mtt_gamma = R_pd[1, 3];
+    cor_mtt_alpha = R_pd[1, 4];
+    cor_circ0_gamma = R_pd[2, 3];
+    cor_circ0_alpha = R_pd[2, 4];
+    cor_gamma_alpha = R_pd[3, 4];
 
-    omega_kin_kout = Omega_pd[1, 2];
-    omega_kin_ic50 = Omega_pd[1, 3];
-    omega_kout_ic50 = Omega_pd[2, 3];
+    omega_mtt_circ0 = Omega_pd[1, 2];
+    omega_mtt_gamma = Omega_pd[1, 3];
+    omega_mtt_alpha = Omega_pd[1, 4];
+    omega_circ0_gamma = Omega_pd[2, 3];
+    omega_circ0_alpha = Omega_pd[2, 4];
+    omega_gamma_alpha = Omega_pd[3, 4];
 
     for(j in 1:n_subjects){
-      
-      real r_0 = KIN[j]/KOUT[j];
       
       if(solver == 1){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_ir1_ode,
+          pmx_solve_rk45(depot_2cmt_friberg_ode,
                          n_cmt + n_cmt_pd,
                          time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
@@ -637,10 +659,10 @@ generated quantities{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                          KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
+                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
                           
         x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_ir1_ode,
+          pmx_solve_rk45(depot_2cmt_friberg_ode,
                          n_cmt + n_cmt_pd,
                          time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
@@ -651,13 +673,12 @@ generated quantities{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          {TVCL, TVVC, TVQ, TVVP, TVKA, 
-                          TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                          TVR0})';
+                          TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
           
       }else if(solver == 2){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
                                 n_cmt_pd,
                                 time[subj_start[j]:subj_end[j]],
                                 amt[subj_start[j]:subj_end[j]],
@@ -668,12 +689,11 @@ generated quantities{
                                 addl[subj_start[j]:subj_end[j]],
                                 ss[subj_start[j]:subj_end[j]],
                                 {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                 KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], 
-                                 r_0}, 
+                                 MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
                                 bioav, tlag)';
                                 
         x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
                                 n_cmt_pd,
                                 time[subj_start[j]:subj_end[j]],
                                 amt[subj_start[j]:subj_end[j]],
@@ -684,14 +704,13 @@ generated quantities{
                                 addl[subj_start[j]:subj_end[j]],
                                 ss[subj_start[j]:subj_end[j]],
                                 {TVCL, TVQ, TVVC, TVVP, TVKA, 
-                                 TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                                 TVR0}, 
+                                 TVMTT, TVCIRC0, TVGAMMA, TVALPHA}, 
                                 bioav, tlag)';
                            
       }else if(solver == 3){
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_ir1_ode,
+          pmx_solve_bdf(depot_2cmt_friberg_ode,
                         n_cmt + n_cmt_pd,
                         time[subj_start[j]:subj_end[j]],
                         amt[subj_start[j]:subj_end[j]],
@@ -702,10 +721,10 @@ generated quantities{
                         addl[subj_start[j]:subj_end[j]],
                         ss[subj_start[j]:subj_end[j]],
                         {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                        KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
+                         MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
                         
         x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_ir1_ode,
+          pmx_solve_bdf(depot_2cmt_friberg_ode,
                         n_cmt + n_cmt_pd,
                         time[subj_start[j]:subj_end[j]],
                         amt[subj_start[j]:subj_end[j]],
@@ -716,13 +735,12 @@ generated quantities{
                         addl[subj_start[j]:subj_end[j]],
                         ss[subj_start[j]:subj_end[j]],
                         {TVCL, TVVC, TVQ, TVVP, TVKA, 
-                         TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                         TVR0})';
+                         TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
                          
       }else{
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
                                n_cmt_pd,
                                time[subj_start[j]:subj_end[j]],
                                amt[subj_start[j]:subj_end[j]],
@@ -733,12 +751,11 @@ generated quantities{
                                addl[subj_start[j]:subj_end[j]],
                                ss[subj_start[j]:subj_end[j]],
                                {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], 
-                                r_0}, 
+                                MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
                                bioav, tlag)';
                                
         x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
                                n_cmt_pd,
                                time[subj_start[j]:subj_end[j]],
                                amt[subj_start[j]:subj_end[j]],
@@ -749,8 +766,7 @@ generated quantities{
                                addl[subj_start[j]:subj_end[j]],
                                ss[subj_start[j]:subj_end[j]],
                                {TVCL, TVQ, TVVC, TVVP, TVKA, 
-                                TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                                TVR0}, 
+                                TVMTT, TVCIRC0, TVGAMMA, TVALPHA}, 
                                bioav, tlag)';
         
       }
@@ -759,7 +775,7 @@ generated quantities{
         if(cmt[k] == 2){
           dv_ipred[k] = x_ipred[k, 2] / VC[j];
         }else if(cmt[k] == 4){
-          dv_ipred[k] = x_ipred[k, 4] + r_0;
+          dv_ipred[k] = x_ipred[k, 8] + CIRC0[j];
         }
       }
     }
