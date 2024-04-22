@@ -8,8 +8,9 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_ppa_ir1_ppa.csv",
-                        na = ".") %>% 
+nonmem_data <- 
+  read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv",
+           na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -76,25 +77,29 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
-                  scale_sigma_a = 1,
+                  scale_sigma_a = 5,
                   lkj_df_sigma = 2,
-                  location_tvkin = 5,
-                  location_tvkout = 0.2,
-                  location_tvic50 = 10,
-                  scale_tvkin = 1,
-                  scale_tvkout = 1,
-                  scale_tvic50 = 1,
-                  scale_omega_kin = 0.4,
-                  scale_omega_kout = 0.4,
-                  scale_omega_ic50 = 0.4,
+                  location_tvmtt = 100,
+                  location_tvcirc0 = 5,
+                  location_tvgamma = 0.2,
+                  location_tvalpha = 3e-4,
+                  scale_tvmtt = 1,
+                  scale_tvcirc0 = 1,
+                  scale_tvgamma = 1,
+                  scale_tvalpha = 1,
+                  scale_omega_mtt = 0.4,
+                  scale_omega_circ0 = 0.4,
+                  scale_omega_gamma = 0.4,
+                  scale_omega_alpha = 0.4,
                   lkj_df_omega_pd = 2,
                   scale_sigma_p_pd = 0.5,
-                  scale_sigma_a_pd = 1,
+                  scale_sigma_a_pd = 0.5,
                   lkj_df_sigma_pd = 2,
-                  prior_only = 1)
+                  prior_only = 1,
+                  no_gq_predictions = 1)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_ppa_ir1_ppa.stan",
+  "depot_2cmt_linear_friberg/Stan/Fit/depot_2cmt_ppa_friberg_ppa.stan",
   cpp_options = list(stan_threads = TRUE))
 
 priors <- model$sample(
@@ -114,28 +119,27 @@ priors <- model$sample(
                          TVVP = rlnorm(1, log(40), 0.3),
                          TVKA = rlnorm(1, log(1), 0.3),
                          omega = rlnorm(5, log(0.3), 0.3),
-                         sigma = c(rlnorm(1, log(0.2), 0.3), 
-                                   rlnorm(1, log(0.8), 0.3)),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_pd = c(rlnorm(1, log(0.2), 0.3), 
-                                      rlnorm(1, log(0.8), 0.3))))
+                         sigma_p = rlnorm(1, log(0.2), 0.3),
+                         TVMTT = rlnorm(1, log(120), 0.3),
+                         TVCIRC0 = rlnorm(1, log(5), 0.3),
+                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
+                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
+                         omega_pd = rlnorm(4, log(0.35), 0.3),
+                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
 
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_ppa_friberg_ppa.rds")
 
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_ppa_ir1_ppa.rds")
 draws_df <- fit$draws(format = "draws_df")
 
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "q", "vp", "ka",
-                                               "kin", "kout", "ic50")),
+                                               "mtt", "circ0", "gamma", 
+                                               "alpha")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
                              str_c("sigma_", c("p", "a", "p_pd", "a_pd")))
 
 draws_all_df <- priors$draws(format = "draws_df") %>% 
   mutate(target = "prior") %>% 
-  drop_na() %>% 
   bind_rows(draws_df %>% 
               mutate(target = "posterior")) %>% 
   select(all_of(parameters_to_summarize), target) %>% 
@@ -158,11 +162,10 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1))
 
 (target_comparison_tv_pd <- draws_all_df %>% 
-    filter(variable %in% str_c("TV", c("KIN", "KOUT", 
-                                       "IC50"))) %>%
+    filter(variable %in% str_c("TV", c("MTT", "CIRC0", "GAMMA", "ALPHA"))) %>%
     mutate(variable = factor(variable, 
-                             levels = str_c("TV", c("KIN", "KOUT", 
-                                                    "IC50")))) %>% 
+                             levels = str_c("TV", c("MTT", "CIRC0", "GAMMA", 
+                                                    "ALPHA")))) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() +
@@ -192,13 +195,15 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_omega_pd <- draws_all_df %>% 
-    filter(variable %in% str_c("omega_", c("kin", "kout", "ic50"))) %>% 
+    filter(variable %in% str_c("omega_", c("mtt", "circ0", "gamma", 
+                                           "alpha"))) %>% 
     mutate(variable = factor(variable, 
-                             levels = str_c("omega_", c("kin", "kout", 
-                                                        "ic50"))),
-           variable = fct_recode(variable, "omega[K[`in`]]" = "omega_kin",
-                                 "omega[K[out]]" = "omega_kout",
-                                 "omega[IC[50]]" = "omega_ic50")) %>% 
+                             levels = str_c("omega_", c("mtt", "circ0", "gamma",
+                                                        "alpha"))),
+           variable = fct_recode(variable, "omega[MTT]" = "omega_mtt",
+                                 "omega[Circ[0]]" = "omega_circ0",
+                                 "omega[gamma]" = "omega_gamma",
+                                 "omega[alpha]" = "omega_alpha")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -238,17 +243,27 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 2, labeller = label_parsed))
 
 (target_comparison_cor_pd <- draws_all_df %>% 
-    filter(variable %in% c("cor_kin_kout", "cor_kin_ic50", "cor_kout_ic50")) %>% 
+    filter(variable %in% c("cor_mtt_circ0", "cor_mtt_gamma", "cor_mtt_alpha",
+                           "cor_circ0_gamma", "cor_circ0_alpha",
+                           "cor_gamma_alpha")) %>% 
     mutate(variable = 
              factor(variable, 
-                    levels = c("cor_kin_kout", "cor_kin_ic50", "cor_kout_ic50")),
+                    levels = c("cor_mtt_circ0", "cor_mtt_gamma", "cor_mtt_alpha",
+                               "cor_circ0_gamma", "cor_circ0_alpha",
+                               "cor_gamma_alpha")),
            variable = fct_recode(variable, 
-                                 "rho[paste(K[`in`], ', ', K[out])]" = 
-                                   "cor_kin_kout",
-                                 "rho[paste(K[`in`], ', ', IC[50])]" = 
-                                   "cor_kin_ic50",
-                                 "rho[paste(K[out], ', ', IC[50])]" = 
-                                   "cor_kout_ic50")) %>% 
+                                 "rho[paste(MTT, ', ', Circ[0])]" = 
+                                   "cor_mtt_circ0",
+                                 "rho[paste(MTT, ', ', gamma)]" = 
+                                   "cor_mtt_gamma",
+                                 "rho[paste(MTT, ', ', alpha)]" = 
+                                   "cor_mtt_alpha",
+                                 "rho[paste(Circ[0], ', ', gamma)]" = 
+                                   "cor_circ0_gamma",
+                                 "rho[paste(Circ[0], ', ', alpha)]" = 
+                                   "cor_circ0_alpha",
+                                 "rho[paste(gamma, ', ', alpha)]" = 
+                                   "cor_gamma_alpha")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -292,7 +307,7 @@ layout_pk <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 4.5, r = 6),
-  area(t = 5, l = 1, b = 5.5, r = 6)
+  area(t = 5, l = 3, b = 5.5, r = 4)
 )
 
 target_comparison_tv_pk /
@@ -307,7 +322,7 @@ layout_pd <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 4.5, r = 6),
-  area(t = 5, l = 1, b = 5.5, r = 6)
+  area(t = 5, l = 3, b = 5.5, r = 4)
 )
 
 target_comparison_tv_pd /

@@ -4,7 +4,8 @@
 // IIV on MTT, CIRC0, GAMMA, ALPHA (full covariance matrix) for PD
 // proportional error on PK - DV = IPRED*(1 + eps_p)
 // proportional error on PD - DV = IPRED*(1 + eps_p_pd)
-// Users choice of general or coupled ODE solution using Torsten
+// General ODE solution using Torsten (not sure why, but it's faster than 
+//   coupled). rk45, since it's faster than bdf
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
 // Since we have a normal distribution on the error, but the DV must be > 0, it
@@ -153,8 +154,7 @@ functions{
                         int n_random, int n_random_pd, 
                         int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, 
-                        int n_cmt, int n_cmt_pd,  
-                        int solver){
+                        int n_cmt, int n_cmt_pd){
                            
     real ptarget = 0;
                               
@@ -180,74 +180,20 @@ functions{
     
       int j = n + start - 1; // j is the ID of the current subject
       
-      if(solver == 1){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_friberg_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_2cmt_friberg_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {CL[j], VC[j], Q[j], VP[j], KA[j], 
+                        MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
           
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                 MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
-                                bioav, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_friberg_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                         MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
-                         
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
-                               bioav, tlag)';
-        
-      }
-                      
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           dv_ipred[k] = x_ipred[k, 2] / VC[j];
@@ -261,33 +207,24 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      if(cmt_slice[i] == 2){
-        real sigma_tmp = ipred_slice[i]*sigma_p;
+    
+      if(cmt_slice[i] == 2 || cmt_slice[i] == 4){
+        real ipred_tmp = ipred_slice[i];
+        real sigma_tmp = cmt_slice[i] == 2 ? ipred_tmp*sigma_p : ipred_tmp*sigma_p_pd;
+    
         if(bloq_slice[i] == 1){
-          ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
-                                                              sigma_tmp),
-                                  normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                     normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
+          ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_tmp, sigma_tmp),
+                                  normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
         }else{
-          ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                     normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
+          ptarget += normal_lpdf(dv_obs_slice[i] | ipred_tmp, sigma_tmp) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
         }
-      }else if(cmt_slice[i] == 4){
-        real sigma_tmp = ipred_slice[i]*sigma_p_pd;
-        if(bloq_slice[i] == 1){
-          ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_slice[i], 
-                                                              sigma_tmp),
-                                  normal_lcdf(0.0 | ipred_slice[i], sigma_tmp)) -
-                     normal_lccdf(0.0 | ipred_slice[i], sigma_tmp); 
-        }else{
-          ptarget += normal_lpdf(dv_obs_slice[i] | ipred_slice[i], sigma_tmp) -
-                     normal_lccdf(0.0 | ipred_slice[i], sigma_tmp);
-        }
-      }
-    }                                         
-                              
-    return ptarget;
-                           
+      }  
+    }
+  
+    return ptarget;         
+  
   }
   
 }
@@ -354,8 +291,6 @@ data{
   real<lower = 0> scale_sigma_p_pd;  // Prior Scale parameter for proportional error for PD
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
-  
-  int<lower = 1, upper = 4> solver; // 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf
  
 }
 transformed data{ 
@@ -518,7 +453,7 @@ model{
                          sigma_p, sigma_p_pd,
                          lloq, bloq,
                          n_random, n_random_pd, n_subjects, n_total,
-                         bioav, tlag, n_cmt, n_cmt_pd, solver);
+                         bioav, tlag, n_cmt, n_cmt_pd);
                          
   }
 }
@@ -644,133 +579,35 @@ generated quantities{
     omega_gamma_alpha = Omega_pd[3, 4];
 
     for(j in 1:n_subjects){
-      
-      if(solver == 1){
         
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_friberg_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
-                          
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_2cmt_friberg_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVQ, TVVP, TVKA, 
-                          TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
-          
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                 MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
-                                bioav, tlag)';
-                                
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_rk45(depot_2cmt_friberg_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {TVCL, TVQ, TVVC, TVVP, TVKA, 
-                                 TVMTT, TVCIRC0, TVGAMMA, TVALPHA}, 
-                                bioav, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_friberg_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], Q[j], VP[j], KA[j], 
-                         MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_2cmt_friberg_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {CL[j], VC[j], Q[j], VP[j], KA[j], 
+                        MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
                         
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_2cmt_friberg_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {TVCL, TVVC, TVQ, TVVP, TVKA, 
-                         TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
-                         
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {CL[j], Q[j], VC[j], VP[j], KA[j], 
-                                MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
-                               bioav, tlag)';
-                               
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {TVCL, TVQ, TVVC, TVVP, TVKA, 
-                                TVMTT, TVCIRC0, TVGAMMA, TVALPHA}, 
-                               bioav, tlag)';
-        
-      }
-      
+      x_pred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_2cmt_friberg_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {TVCL, TVVC, TVQ, TVVP, TVKA, 
+                        TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
+          
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           dv_ipred[k] = x_ipred[k, 2] / VC[j];
@@ -786,7 +623,6 @@ generated quantities{
     ipred = dv_ipred[i_obs];
 
   }
-
 
   res = dv_obs - pred;
   ires = dv_obs - ipred;

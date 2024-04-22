@@ -10,7 +10,7 @@ library(patchwork)
 library(posterior)
 library(tidyverse)
 
-nonmem_data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_prop_ir1_prop.csv",
+nonmem_data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -21,7 +21,7 @@ nonmem_data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_prop_ir1_prop.csv
 ## Summary of BLOQ values
 nonmem_data %>%
   filter(evid == 0) %>%
-  group_by(ID) %>%
+  group_by(ID, cmt) %>%
   summarize(lloq = unique(lloq),
             n_obs = n(),
             n_bloq = sum(bloq)) %>%
@@ -29,14 +29,14 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop.rds")
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_ppa_friberg_ppa.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "q", "vp", "ka",
-                                               "kin", "kout", "ic50")),
+                                               "mtt", "circ0", "gamma", "alpha")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             str_c("sigma_", c("p", "p_pd")))
+                             str_c("sigma_", c("p", "a", "p_pd", "a_pd")))
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -75,24 +75,24 @@ mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA")),
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_q", 
                        "omega_vp", "omega_ka")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws("sigma_p"),
+mcmc_combo(fit$draws(c("sigma_p", "sigma_a")),
            combo = c("dens_overlay", "trace"))
 
-mcmc_combo(fit$draws(c("TVKIN", "TVKOUT", "TVIC50")),
+mcmc_combo(fit$draws(c("TVMTT", "TVCIRC0", "TVGAMMA", "TVALPHA")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("omega_kin", "omega_kout", "omega_ic50")),
+mcmc_combo(fit$draws(c("omega_mtt", "omega_circ0", "omega_gamma", "omega_alpha")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws("sigma_p_pd"),
+mcmc_combo(fit$draws(c("sigma_p_pd", "sigma_a_pd")),
            combo = c("dens_overlay", "trace"))
 
 mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP", "TVKA")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_q", 
                            "omega_vp", "omega_ka")))
-mcmc_rank_hist(fit$draws("sigma_p"))
+mcmc_rank_hist(fit$draws(c("sigma_p", "sigma_a")))
 
-mcmc_rank_hist(fit$draws(c("TVKIN", "TVKOUT", "TVIC50")))
-mcmc_rank_hist(fit$draws(c("omega_kin", "omega_kout", "omega_ic50")))
-mcmc_rank_hist(fit$draws("sigma_p_pd"))
+mcmc_rank_hist(fit$draws(c("TVMTT", "TVCIRC0", "TVGAMMA", "TVALPHA")))
+mcmc_rank_hist(fit$draws(c("omega_mtt", "omega_circ0", "omega_gamma", "omega_alpha")))
+mcmc_rank_hist(fit$draws(c("sigma_p_pd", "sigma_a_pd")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo()
@@ -188,45 +188,89 @@ p_dv_vs_pred_pd +
      scale_y_log10() +
      scale_x_log10())
 
-tmp <- ggplot(post_preds_summary) +
-  ggforce::facet_wrap_paginate(~ID + cmt, labeller = label_both,
+tmp_pk <- ggplot(post_preds_summary %>% 
+                   filter(cmt == "PK")) +
+  ggforce::facet_wrap_paginate(~ID, labeller = label_both,
                                nrow = 3, ncol = 4,
                                page = 1, scales = "free_y")
 
-for(i in 1:ggforce::n_pages(tmp)){
-  print(ggplot() +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = ipred.lower, 
+tmp_pd <- ggplot(post_preds_summary %>% 
+                   filter(cmt == "PD")) +
+  ggforce::facet_wrap_paginate(~ID, labeller = label_both,
+                               nrow = 3, ncol = 4,
+                               page = 1, scales = "free_y")
+
+for(i in 1:ggforce::n_pages(tmp_pk)){
+  print(ggplot(data = post_preds_summary %>% 
+                 filter(cmt == "PK")) +
+          geom_ribbon(mapping = aes(x = time, ymin = ipred.lower, 
                                     ymax = ipred.upper, group = ID),
                       fill = "blue", alpha = 0.5, show.legend = FALSE) +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = dv_ppc.lower, 
+          geom_ribbon(mapping = aes(x = time, ymin = dv_ppc.lower, 
                                     ymax = dv_ppc.upper, group = ID),
                       fill = "blue", alpha = 0.25, show.legend = FALSE) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = ipred, 
+          geom_line(mapping = aes(x = time, y = ipred, 
                                   group = ID),
                     linetype = 1, linewidth = 1.15) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = pred, 
+          geom_line(mapping = aes(x = time, y = pred, 
                                   group = ID),
                     linetype = 2, linewidth = 1.05) +
           geom_point(data = post_preds_summary %>% 
-                       filter(bloq == 0), 
+                       filter(cmt == "PK", bloq == 0), 
                      mapping = aes(x = time, y = DV, group = ID),
                      size = 2, color = "red", show.legend = FALSE) +
-          scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+          scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(ng/mL)$"),
                              limits = c(NA, NA),
                              trans = "identity") +
           scale_x_continuous(name = "Time (h)",
-                             breaks = seq(0, max(nonmem_data$time), by = 14),
-                             labels = seq(0, max(nonmem_data$time), by = 14),
-                             limits = c(0, max(nonmem_data$time))) +
+                             breaks = seq(0, max(nonmem_data$time[nonmem_data$cmt == 2]), 
+                                          by = 24),
+                             labels = seq(0, max(nonmem_data$time[nonmem_data$cmt == 2]), 
+                                          by = 24),
+                             limits = c(0, max(nonmem_data$time[nonmem_data$cmt == 2]))) +
           theme_bw() +
           theme(axis.text = element_text(size = 14, face = "bold"),
                 axis.title = element_text(size = 18, face = "bold"),
                 legend.position = "bottom") +
-          ggforce::facet_wrap_paginate(~ ID + cmt, labeller = label_both,
+          ggforce::facet_wrap_paginate(~ ID, labeller = label_both,
+                                       nrow = 3, ncol = 4,
+                                       page = i, scales = "free"))
+  
+}
+
+for(i in 1:ggforce::n_pages(tmp_pd)){
+  print(ggplot(data = post_preds_summary %>% 
+                 filter(cmt == "PD")) +
+          geom_ribbon(mapping = aes(x = time, ymin = ipred.lower, 
+                                    ymax = ipred.upper, group = ID),
+                      fill = "blue", alpha = 0.5, show.legend = FALSE) +
+          geom_ribbon(mapping = aes(x = time, ymin = dv_ppc.lower, 
+                                    ymax = dv_ppc.upper, group = ID),
+                      fill = "blue", alpha = 0.25, show.legend = FALSE) +
+          geom_line(mapping = aes(x = time, y = ipred, 
+                                  group = ID),
+                    linetype = 1, linewidth = 1.15) +
+          geom_line(mapping = aes(x = time, y = pred, 
+                                  group = ID),
+                    linetype = 2, linewidth = 1.05) +
+          geom_point(data = post_preds_summary %>% 
+                       filter(cmt == "PD", bloq == 0), 
+                     mapping = aes(x = time, y = DV, group = ID),
+                     size = 2, color = "red", show.legend = FALSE) +
+          scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                             limits = c(NA, NA),
+                             trans = "identity") +
+          scale_x_continuous(name = "Time (h)",
+                             breaks = seq(0, max(nonmem_data$time[nonmem_data$cmt == 4]), 
+                                          by = 168),
+                             labels = seq(0, max(nonmem_data$time[nonmem_data$cmt == 4]), 
+                                          by = 168),
+                             limits = c(0, max(nonmem_data$time[nonmem_data$cmt == 4]))) +
+          theme_bw() +
+          theme(axis.text = element_text(size = 14, face = "bold"),
+                axis.title = element_text(size = 18, face = "bold"),
+                legend.position = "bottom") +
+          ggforce::facet_wrap_paginate(~ ID, labeller = label_both,
                                        nrow = 3, ncol = 4,
                                        page = i, scales = "free"))
   
@@ -312,7 +356,7 @@ residuals %>%
   geom_smooth(se = FALSE, color = "red", linewidth = 1.25) +
   theme_bw() +
   xlab("Time (h)") +
-  facet_wrap(~ .draw + cmt, labeller = label_both, ncol = 2)
+  facet_wrap(~ .draw + cmt, labeller = label_both, ncol = 2, scales = "free_x")
 
 residuals %>% 
   filter(bloq == 0) %>%
@@ -402,7 +446,7 @@ iwres_mean %>%
   scale_y_continuous(name = "iwres") +
   scale_x_continuous(name = "Time (h)",
                      limits = c(NA, NA)) +
-  facet_wrap(~ cmt)
+  facet_wrap(~ cmt, scales = "free_x")
 
 
 iwres_mean %>% 
@@ -457,8 +501,8 @@ ggplot() +
   ggtitle("Individual Parameter Posterior Densities") 
 
 blah_pd <- draws_df %>%
-  gather_draws(c(KIN, KOUT, IC50)[ID], 
-               TVKIN, TVKOUT, TVIC50) %>%
+  gather_draws(c(MTT, CIRC0, GAMMA, ALPHA)[ID], 
+               TVMTT, TVCIRC0, TVGAMMA, TVALPHA) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
 
@@ -487,11 +531,10 @@ ggplot() +
   guides(color = "none") +
   ggtitle("Individual Parameter Posterior Densities") 
 
-## TODO: Work from here down
 ## Shrinkage
 # A function to visualize the shrinkage
 plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP", "KA", 
-                                         "KIN", "KOUT", "IC50"),
+                                         "MTT", "CIRC0", "GAMMA", "ALPHA"),
                            std_dev, ind_params, ...){
   
   dots <- list(...)
@@ -542,7 +585,7 @@ plot_shrinkage_multiple <- function(draw){
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
                 gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-                             omega_kin, omega_kout, omega_ic50) %>% 
+                             omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -558,14 +601,14 @@ draws_for_shrinkage <- draws_df %>%
 
 data_shrinkage_by_draw <- draws_for_shrinkage %>%
   gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-               omega_kin, omega_kout, omega_ic50) %>%
+               omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>%
   mutate(.variable = str_remove(.variable, "omega_") %>%
            toupper()) %>%
   rename(std_dev = .value) %>%
   ungroup() %>% 
   inner_join(draws_for_shrinkage %>%
                gather_draws(c(eta_cl, eta_vc, eta_q, eta_vp, eta_ka,
-                              eta_kin, eta_kout, eta_ic50)[ID]) %>%
+                              eta_mtt, eta_circ0, eta_gamma, eta_alpha)[ID]) %>%
                ungroup()  %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -599,7 +642,7 @@ draws_df %>%
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
               gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-                           omega_kin, omega_kout, omega_ic50) %>% 
+                           omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
@@ -608,13 +651,13 @@ draws_df %>%
 
 data_shrinkage_with_point_estimates <- draws_df %>% 
   gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-               omega_kin, omega_kout, omega_ic50) %>% 
+               omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
   summarize(std_dev = mean(.value)) %>% 
   mutate(.variable = str_remove(.variable, "omega_") %>% 
            toupper()) %>% 
   inner_join(draws_df %>%
                gather_draws(c(eta_cl, eta_vc, eta_q, eta_vp, eta_ka,
-                              eta_kin, eta_kout, eta_ic50)[ID]) %>%
+                              eta_mtt, eta_circ0, eta_gamma, eta_alpha)[ID]) %>%
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
@@ -630,12 +673,13 @@ pmap(data_shrinkage_with_point_estimates,
 
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(c(CL, VC, Q, VP, KA, KIN, KOUT, IC50, 
+  spread_draws(c(CL, VC, Q, VP, KA, MTT, CIRC0, GAMMA, ALPHA, 
                  eta_cl, eta_vc, eta_q, eta_vp, eta_ka,
-                 eta_kin, eta_kout, eta_ic50)[ID]) %>% 
+                 eta_mtt, eta_circ0, eta_gamma, eta_alpha)[ID]) %>% 
   mean_qi() %>% 
-  select(ID, CL, VC, Q, VP, KA, KIN, KOUT, IC50,
-         eta_cl, eta_vc, eta_q, eta_vp, eta_ka, eta_kin, eta_kout, eta_ic50) %>% 
+  select(ID, CL, VC, Q, VP, KA, MTT, CIRC0, GAMMA, ALPHA,
+         eta_cl, eta_vc, eta_q, eta_vp, eta_ka, 
+         eta_mtt, eta_circ0, eta_gamma, eta_alpha) %>% 
   mutate(ID = factor(ID))
 
 ## Standardized Random Effects (posterior mean)
@@ -654,7 +698,7 @@ eta_std <- est_ind %>%
     ggplot(aes(x = eta_cl, y = eta_vc)) + 
     geom_point() +
     theme_bw() + 
-    geom_smooth(method = "loess", span = 0.9) +
+    geom_smooth(method = "lm", span = 0.9) +
     ggtitle("Point Estimates")) +
   (draws_df %>%
      sample_draws(10) %>%
@@ -664,7 +708,9 @@ eta_std <- est_ind %>%
      ggplot(aes(x = eta_cl, y = eta_vc)) + 
      geom_point() +
      theme_bw() + 
-     geom_smooth(method = "loess", span = 0.9) +
+     geom_smooth(method = "lm", span = 0.9) +
      ggtitle("Samples"))
+
+
 
 

@@ -38,9 +38,12 @@ R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 R_pd <- diag(rep(1, times = 4))
 R_pd[1, 2] <- R_pd[2, 1] <- 0.7 # Put in some correlation between MTT and CIRC0
 
-sigma <- 0.2
+sigma_p <- 0.2
+sigma_a <- 5 # LLOQ = 10 
 
-sigma_pd <- 0.15
+cor_p_a <- 0
+
+sigma_pd <- 0.25
 
 n_subjects_per_dose <- 12
 
@@ -146,14 +149,16 @@ stan_data <- list(n_subjects = n_subjects,
                   omega_gamma = omega_gamma,
                   omega_alpha = omega_alpha,
                   R = R,
-                  sigma = sigma,
+                  sigma_p = sigma_p,
+                  sigma_a = sigma_a,
+                  cor_p_a = cor_p_a,
                   R_pd = R_pd,
                   sigma_pd = sigma_pd,
                   t_1 = 144,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_friberg/Stan/Simulate/depot_2cmt_exp_friberg_exp_with_cmax_tmax_auc.stan") 
+  "depot_2cmt_linear_friberg/Stan/Simulate/depot_2cmt_ppa_friberg_exp_with_cmax_tmax_auc.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
@@ -247,9 +252,9 @@ p_pk +
 
 data %>%
   select(-IPRED) %>% 
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_exp_friberg_exp.csv", na = ".")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_exp.csv", na = ".")
 
 params_ind %>%
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_exp_friberg_exp_params_ind.csv")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_exp_params_ind.csv")
 
 

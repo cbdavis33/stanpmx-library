@@ -8,7 +8,7 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_exp_ir1_exp.csv",
+nonmem_data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -134,47 +134,55 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_vp = 0.4,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
-                  scale_sigma = 0.5,
-                  location_tvkin = 5,
-                  location_tvkout = 0.2,
-                  location_tvic50 = 10,
-                  scale_tvkin = 1,
-                  scale_tvkout = 1,
-                  scale_tvic50 = 1,
-                  scale_omega_kin = 0.4,
-                  scale_omega_kout = 0.4,
-                  scale_omega_ic50 = 0.4,
+                  scale_sigma_p = 0.5,
+                  location_tvmtt = 100,
+                  location_tvcirc0 = 5,
+                  location_tvgamma = 0.2,
+                  location_tvalpha = 3e-4,
+                  scale_tvmtt = 1,
+                  scale_tvcirc0 = 1,
+                  scale_tvgamma = 1,
+                  scale_tvalpha = 1,
+                  scale_omega_mtt = 0.4,
+                  scale_omega_circ0 = 0.4,
+                  scale_omega_gamma = 0.4,
+                  scale_omega_alpha = 0.4,
                   lkj_df_omega_pd = 2,
-                  scale_sigma_pd = 0.5,
-                  prior_only = 0)
+                  scale_sigma_p_pd = 0.5,
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_exp_ir1_exp.stan",
+  "depot_2cmt_linear_friberg/Stan/Fit/depot_2cmt_prop_friberg_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(
   data = stan_data,
-  seed = 11235,
+  seed = 112358,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.8,
-  refresh = 500,
-  max_treedepth = 10,
+  refresh = 100,
+  max_treedepth = 10, 
+  output_dir = "depot_2cmt_linear_friberg/Stan/Fits/Output",
+  output_basename = "prop_prop",
   init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                          TVVC = rlnorm(1, log(18), 0.3),
                          TVQ = rlnorm(1, log(2), 0.3),
                          TVVP = rlnorm(1, log(40), 0.3),
                          TVKA = rlnorm(1, log(1), 0.3),
                          omega = rlnorm(5, log(0.3), 0.3),
-                         sigma = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_pd = rlnorm(1, log(0.2), 0.3)))
+                         sigma_p = rlnorm(1, log(0.2), 0.3),
+                         TVMTT = rlnorm(1, log(120), 0.3),
+                         TVCIRC0 = rlnorm(1, log(5), 0.3),
+                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
+                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
+                         omega_pd = rlnorm(4, log(0.35), 0.3),
+                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_exp_ir1_exp.rds")
-
+fit$save_object("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop.rds")
+fit$save_data_file(dir = "depot_2cmt_linear_friberg/Stan/Fits/Stan_Data",
+                   basename = "prop_prop", timestamp = FALSE, random = FALSE)

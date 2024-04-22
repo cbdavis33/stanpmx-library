@@ -1,14 +1,14 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
+# library(trelliscopejs)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv",
+nonmem_data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_exp.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -40,11 +40,9 @@ nonmem_data %>%
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10") + 
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, max(nonmem_data$time[nonmem_data$cmt == 2]), 
-                                    by = 24),
-                       labels = seq(0, max(nonmem_data$time[nonmem_data$cmt == 2]), 
-                                    by = 24),
-                       limits = c(0, max(nonmem_data$time[nonmem_data$cmt == 2]))) +
+                       breaks = seq(0, max(nonmem_data$time), by = 24),
+                       labels = seq(0, max(nonmem_data$time), by = 24),
+                       limits = c(0, max(nonmem_data$time))) +
     facet_wrap(~ cmt, scales = "free"))
 
 (p_pd <- ggplot(nonmem_data %>% 
@@ -59,14 +57,12 @@ nonmem_data %>%
     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
-                       trans = "identity") + 
+    scale_y_continuous(name = latex2exp::TeX("Response (unit)"),
+                       trans = "log10") + 
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, max(nonmem_data$time[nonmem_data$cmt == 4]), 
-                                    by = 24),
-                       labels = seq(0, max(nonmem_data$time[nonmem_data$cmt == 4]), 
-                                    by = 24),
-                       limits = c(0, max(nonmem_data$time[nonmem_data$cmt == 4]))) +
+                       breaks = seq(0, max(nonmem_data$time), by = 24),
+                       labels = seq(0, max(nonmem_data$time), by = 24),
+                       limits = c(0, max(nonmem_data$time))) +
     facet_wrap(~ cmt, scales = "free"))
 
 p_pk + 
@@ -74,10 +70,10 @@ p_pk +
   plot_layout(guides = 'collect') &
   theme(legend.position = "bottom")
 
-p_pk +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-p_pd +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p_pk +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p_pd +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -139,6 +135,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
+                  scale_sigma_a = 5,
+                  lkj_df_sigma = 2,
                   location_tvmtt = 100,
                   location_tvcirc0 = 5,
                   location_tvgamma = 0.2,
@@ -152,127 +150,43 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_gamma = 0.4,
                   scale_omega_alpha = 0.4,
                   lkj_df_omega_pd = 2,
-                  scale_sigma_p_pd = 0.5,
+                  scale_sigma_pd = 0.5,
                   prior_only = 0,
-                  solver = 1) # 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_friberg/Stan/Fit/depot_2cmt_prop_friberg_prop_all_solvers.stan",
+  "depot_2cmt_linear_friberg/Stan/Fit/depot_2cmt_ppa_friberg_exp.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit_rk45 <- model$sample(
+fit <- model$sample(
   data = stan_data,
-  seed = 11235,
+  seed = 8675309,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.8,
-  refresh = 50,
+  refresh = 100,
   max_treedepth = 10,
+  output_dir = "depot_2cmt_linear_friberg/Stan/Fits/Output",
+  output_basename = "ppa_exp",
   init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                          TVVC = rlnorm(1, log(18), 0.3),
                          TVQ = rlnorm(1, log(2), 0.3),
                          TVVP = rlnorm(1, log(40), 0.3),
                          TVKA = rlnorm(1, log(1), 0.3),
                          omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
+                         sigma = c(rlnorm(1, log(0.2), 0.3), 
+                                   rlnorm(1, log(0.8), 0.3)),
                          TVMTT = rlnorm(1, log(120), 0.3),
                          TVCIRC0 = rlnorm(1, log(5), 0.3),
                          TVGAMMA = rlnorm(1, log(0.2), 0.3),
                          TVALPHA = rlnorm(1, log(3e-4), 0.3),
                          omega_pd = rlnorm(4, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
+                         sigma_pd = rlnorm(1, log(0.2), 0.3)))
 
-fit_rk45$save_object("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_rk45.rds")
-
-
-stan_data$solver <- 2
-fit_rk45_coupled <- model$sample(
-  data = stan_data,
-  seed = 112358,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVMTT = rlnorm(1, log(120), 0.3),
-                         TVCIRC0 = rlnorm(1, log(5), 0.3),
-                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
-                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
-                         omega_pd = rlnorm(4, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_rk45_coupled$save_object(
-  "depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_rk45_coupled.rds")
-
-
-stan_data$solver <- 3
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 112358,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVMTT = rlnorm(1, log(120), 0.3),
-                         TVCIRC0 = rlnorm(1, log(5), 0.3),
-                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
-                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
-                         omega_pd = rlnorm(4, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf$save_object(
-  "depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_bdf.rds")
-
-stan_data$solver <- 4
-fit_bdf_coupled <- model$sample(
-  data = stan_data,
-  seed = 112358,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVQ = rlnorm(1, log(2), 0.3),
-                         TVVP = rlnorm(1, log(40), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVMTT = rlnorm(1, log(120), 0.3),
-                         TVCIRC0 = rlnorm(1, log(5), 0.3),
-                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
-                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
-                         omega_pd = rlnorm(4, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf_coupled$save_object(
-  "depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_bdf_coupled.rds")
+fit$save_object("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_ppa_friberg_exp.rds")
+fit$save_data_file(dir = "depot_2cmt_linear_friberg/Stan/Fits/Stan_Data",
+                   basename = "ppa_exp", timestamp = FALSE, random = FALSE)
 

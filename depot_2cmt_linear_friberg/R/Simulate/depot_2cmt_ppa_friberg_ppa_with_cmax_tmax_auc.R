@@ -39,19 +39,19 @@ R_pd <- diag(rep(1, times = 4))
 R_pd[1, 2] <- R_pd[2, 1] <- 0.7 # Put in some correlation between MTT and CIRC0
 
 sigma_p <- 0.2
-sigma_a <- 0 # 5 # LLOQ = 10 
+sigma_a <- 5 # LLOQ = 10 
 
 cor_p_a <- 0
 
 sigma_p_pd <- 0.15
-sigma_a_pd <- 0 # 0.5 # LLOQ = 1
+sigma_a_pd <- 0.5 # LLOQ = 1
 
 cor_p_a_pd <- 0
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 12
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
-                         cmt = 1, amt = c(10, 20, 40, 80)*1000, tinf = 0,
+                         cmt = 1, amt = c(10, 20)*1000, tinf = 0,
                          ss = 0, evid = 1) %>%
   as_tibble() %>% 
   rename_all(toupper) %>%
@@ -62,7 +62,7 @@ realistic_times_pk <- c(24, 48, 72, 72.25, 72.5, 72.75, 73, 73.5, 74, 74.5,
                         144.5, 144.75, 145, 145.5, 146, 146.5, 147, 148, 150, 
                         152, 156, 160, 164, 168, 180, 192, 204, 216)
 
-realistic_times_pd <- seq(0, 672, by = 24)
+realistic_times_pd <- seq(0, 672, by = 48)
 
 dense_grid_pk <- seq(0, 24*7, by = 2)
 dense_grid_pd <- seq(0, 672, by = 2)
@@ -257,11 +257,11 @@ p_pk +
 
 data %>%
   select(-IPRED) %>% 
-  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv", na = ".")
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv", na = ".")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa.csv", na = ".")
+  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv", na = ".")
 
 params_ind %>%
-  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa_params_ind.csv")
-  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop_params_ind.csv")
+  write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_ppa_friberg_ppa_params_ind.csv")
+  # write_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop_params_ind.csv")
 
 
