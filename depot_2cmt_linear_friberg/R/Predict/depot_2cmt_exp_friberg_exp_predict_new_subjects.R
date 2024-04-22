@@ -10,10 +10,10 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_prop_ir1_prop.rds")
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_exp_friberg_exp.rds")
 
 nonmem_data <- read_csv(
-  "depot_2cmt_linear_ir1/Data/depot_2cmt_prop_ir1_prop.csv",
+  "depot_2cmt_linear_friberg/Data/depot_2cmt_exp_friberg_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -21,9 +21,9 @@ nonmem_data <- read_csv(
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq)) # This value can be anything except NA. It'll be indexed away 
 
-# For this example, let's simulate 100 mg, 200 mg, 400 mg, 800 mg, 1200 mg, 1600 mg 
+# For this example, let's simulate 10 mg, 20 mg, 40 mg, 80 mg
 dosing_data <- mrgsolve::expand.ev(addl = 6, ii = 24, cmt = 1, 
-                                   amt = c(100, 200, 400, 800, 1200, 1600), 
+                                   amt = c(10, 20, 40, 80)*1000, 
                                    tinf = 0, evid = 1, mdv = 1) %>%
   as_tibble() %>% 
   mutate(ss = 0) %>% 
@@ -35,11 +35,12 @@ t1 <- dosing_data %>%
   distinct() %>% 
   deframe()
 
-times_new_pk <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 0.5)))))
-times_new_pd <- times_new_pk
+times_new_pk <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 1),
+                                            seq(168, 672, by = 24)))))
+times_new_pd <- tibble(time = seq(0, 672, by = 12))
 
 new_data_pk <- bind_rows(replicate(max(dosing_data$ID), times_new_pk, 
-                                simplify = FALSE)) %>% 
+                                   simplify = FALSE)) %>% 
   mutate(ID = rep(1:max(dosing_data$ID), each = nrow(times_new_pk)),
          amt = 0, 
          evid = 0, 
@@ -64,8 +65,8 @@ new_data_pd <- bind_rows(replicate(max(dosing_data$ID), times_new_pd,
          mdv = 1, 
          ss = 0) %>%
   select(ID, time, everything())
-  
-  
+
+
 new_data <- new_data_pk %>% 
   bind_rows(new_data_pd, dosing_data) %>% 
   arrange(ID, time, cmt)
@@ -108,16 +109,23 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Predict/depot_2cmt_prop_ir1_prop_predict_new_subjects.stan")
+  "depot_2cmt_linear_friberg/Stan/Predict/depot_2cmt_exp_friberg_exp_predict_new_subjects.stan")
 
-preds <- model$generate_quantities(fit,
+# preds <- model$generate_quantities(fit,
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
+
+preds <- model$generate_quantities(fit %>%
+                                     as_draws_array() %>%
+                                     thin_draws(40),
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
+                                   seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 
-regimens <- str_c(c(100, 200, 400, 800, 1200, 1600), " mg")
+regimens <- str_c(c(10, 20, 40, 80), " mg")
 
 post_preds_summary <- preds_df %>%
   spread_draws(c(pred, ipred, dv)[i]) %>%
@@ -141,7 +149,7 @@ tmp <- ggplot(post_preds_summary %>% filter(cmt == "PK"),
   geom_line(aes(y = dv), linetype = 2, size = 1.05) +
   ggforce::facet_wrap_paginate(~ ID + cmt, 
                                labeller = label_both,
-                               nrow = 1, ncol = 6,
+                               nrow = 1, ncol = length(regimens),
                                page = 1)
 
 p_pk <- p_pd <- vector(mode = "list", length = ggforce::n_pages(tmp))
@@ -155,20 +163,20 @@ for(i in 1:ggforce::n_pages(tmp)){
                 fill = "blue", alpha = 0.5, show.legend = FALSE) +
     geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
     geom_line(aes(y = dv), linetype = 2, size = 1.05) +
-    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(ng/mL)$"),
                        trans = "log10",
                        limits = c(NA, NA)) +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24),
-                       limits = c(0, 168)) +
+    scale_x_continuous(name = "Time (w)",
+                       breaks = seq(0, max(nonmem_data$time), by = 24*7),
+                       labels = seq(0, max(nonmem_data$time)/(24*7), by = 1),
+                       limits = c(0, max(nonmem_data$time))) +
     # scale_x_continuous(name = "Time (d)") +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           legend.position = "bottom") +
     ggforce::facet_wrap_paginate(~ regimen,
-                                 nrow = 1, ncol = 6,
+                                 nrow = 1, ncol = length(regimens),
                                  page = i)
   
 }
@@ -182,22 +190,20 @@ for(i in 1:ggforce::n_pages(tmp)){
                 fill = "blue", alpha = 0.5, show.legend = FALSE) +
     geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
     geom_line(aes(y = dv), linetype = 2, size = 1.05) +
-    scale_y_continuous(name = latex2exp::TeX("Response (units)"),
-                       trans = "log10",
-                       limits = c(NA, NA)) +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24),
-                       limits = c(0, 168)) +
-    # scale_x_continuous(name = "Time (d)") +
+    scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                       trans = "identity") +
+    scale_x_continuous(name = "Time (w)",
+                       breaks = seq(0, 672, by = 168),
+                       labels = seq(0, 672/168, by = 1),
+                       limits = c(0, 672)) +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           legend.position = "bottom") +
     ggforce::facet_wrap_paginate(~ regimen,
-                                 nrow = 1, ncol = 6,
+                                 nrow = 1, ncol = length(regimens),
                                  page = i)
-
+  
 }
 
 for(i in 1:length(p_pk)){
@@ -205,13 +211,13 @@ for(i in 1:length(p_pk)){
           p_pd[[i]])
 }
 
-data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_prop_ir1_prop.csv", 
+data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_exp_friberg_exp.csv", 
                  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
   group_by(ID) %>% 
-  mutate(Dose = max(amt, na.rm = TRUE),
+  mutate(Dose = max(amt, na.rm = TRUE)/1000,
          mdv = evid) %>% 
   ungroup() %>% 
   mutate(regimen = str_c(Dose, " mg"),
@@ -222,8 +228,9 @@ data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_prop_ir1_prop.csv",
 
 
 p_pk_check <- post_preds_summary %>% 
-  filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"),
-         cmt == "PK") %>%
+  filter(regimen %in% str_c(c(10, 20), " mg"),
+         cmt == "PK",
+         time <= 168) %>%
   ggplot(aes(x = time, group = ID)) +
   geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
               fill = "blue", alpha = 0.25, show.legend = FALSE) +
@@ -233,12 +240,12 @@ p_pk_check <- post_preds_summary %>%
   geom_line(aes(y = dv), linetype = 2, size = 1.05) +
   geom_point(data = data %>% 
                mutate(regimen = factor(regimen, levels = regimens)) %>% 
-               filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"), 
+               filter(regimen %in% str_c(c(10, 20), " mg"), 
                       mdv == 0,
                       cmt == "PK"),
              mapping = aes(x = time, y = DV), color = "red", 
              inherit.aes = FALSE) +
-  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(ng/mL)$"),
                      trans = "log10",
                      limits = c(NA, NA)) +
   scale_x_continuous(name = "Time (h)",
@@ -254,7 +261,7 @@ p_pk_check <- post_preds_summary %>%
 
 
 p_pd_check <- post_preds_summary %>% 
-  filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"),
+  filter(regimen %in% str_c(c(10, 20), " mg"),
          cmt == "PD") %>%
   ggplot(aes(x = time, group = ID)) +
   geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
@@ -265,23 +272,22 @@ p_pd_check <- post_preds_summary %>%
   geom_line(aes(y = dv), linetype = 2, size = 1.05) +
   geom_point(data = data %>% 
                mutate(regimen = factor(regimen, levels = regimens)) %>% 
-               filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"), 
+               filter(regimen %in% str_c(c(10, 20), " mg"), 
                       mdv == 0,
                       cmt == "PD"),
              mapping = aes(x = time, y = DV), color = "red", 
              inherit.aes = FALSE) +
-  scale_y_continuous(name = latex2exp::TeX("Response (units)"),
-                     trans = "log10",
-                     limits = c(NA, NA)) +
+  scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                     trans = "identity") +
   scale_x_continuous(name = "Time (h)",
-                     breaks = seq(0, 216, by = 24),
-                     labels = seq(0, 216, by = 24),
-                     limits = c(0, 168)) +
+                     breaks = seq(0, 672, by = 168),
+                     labels = seq(0, 672/168, by = 1),
+                     limits = c(0, 672)) +
   theme_bw() +
   theme(axis.text = element_text(size = 14, face = "bold"),
         axis.title = element_text(size = 18, face = "bold"),
         legend.position = "bottom") +
-  coord_cartesian(xlim = c(0, 168)) +
+  coord_cartesian(xlim = c(0, 672)) +
   facet_wrap(~ regimen + cmt, ncol = 1, scales = "free_y")
 
 ggpubr::ggarrange(p_pk_check, p_pd_check, ncol = 2)
@@ -290,12 +296,20 @@ ggpubr::ggarrange(p_pk_check, p_pd_check, ncol = 2)
 est_ind <- preds_df %>%
   spread_draws(c(CL, VC, Q, VP, KA, 
                  auc_ss, c_max, t_max, t_half_alpha, t_half_terminal,
-                 KIN, KOUT, IC50, t_min, r_min)[ID]) %>% 
+                 MTT, CIRC0, GAMMA, ALPHA, r_min)[ID]) %>% 
   median_qi() %>% 
-  inner_join(post_preds_summary %>% 
-               filter(time == 168, cmt == "PK") %>% 
-               select(ID, c_trough = "ipred") %>% 
-               distinct(),
+  inner_join(preds_df %>%
+               spread_draws(ipred[i]) %>% 
+               mutate(ID = new_data$ID[i],
+                      time = new_data$time[i],
+                      cmt = new_data$cmt[i]) %>% 
+               filter(cmt == 2, time == 168) %>% 
+               rename(c_trough = ipred) %>% 
+               group_by(ID) %>%
+               median_qi(c_trough) %>% 
+               ungroup() %>% 
+               select(ID, c_trough, c_trough.lower = .lower, 
+                      c_trough.upper = .upper),
              by = "ID")
 
 est_ind

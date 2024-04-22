@@ -9,9 +9,9 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_ppa_ir1_ppa.rds")
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop.rds")
 
-nonmem_data <- read_csv("depot_2cmt_linear_ir1/Data/depot_2cmt_ppa_ir1_ppa.csv",
+nonmem_data <- read_csv("depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -33,7 +33,8 @@ new_data_to_simulate_pk <- nonmem_data %>%
   group_by(ID) %>% 
   slice(c(1, n())) %>% 
   # expand(time = seq(time[1], time[2], by = 0.5)) %>%
-  expand(time = seq(time[1], time[2], by = 1)) %>%
+  expand(time = unique(c(seq(time[1], 168, by = 1), 
+                         seq(168, time[2], by = 24)))) %>%
   ungroup() %>% 
   mutate(amt = 0,
          evid = 2,
@@ -54,7 +55,7 @@ new_data_to_simulate_pd <- nonmem_data %>%
   group_by(ID) %>% 
   slice(c(1, n())) %>% 
   # expand(time = seq(time[1], time[2], by = 0.5)) %>%
-  expand(time = seq(time[1], time[2], by = 1)) %>%
+  expand(time = unique(c(0, seq(time[1], time[2], by = 12)))) %>%
   ungroup() %>% 
   mutate(amt = 0,
          evid = 2,
@@ -113,16 +114,24 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Predict/depot_2cmt_ppa_ir1_ppa_predict_observed_subjects.stan")
+  "depot_2cmt_linear_friberg/Stan/Predict/depot_2cmt_prop_friberg_prop_predict_observed_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
+                                   seed = 1234)
+
+# preds <- model$generate_quantities(fit %>% 
+#                                      as_draws_array() %>% 
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
 
 preds_df <- preds$draws(format = "draws_df")
 
 rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data")))
+gc()
 
 post_preds_summary <- preds_df %>%
   spread_draws(c(pred, ipred, dv)[i]) %>%
@@ -150,7 +159,7 @@ ggplot(post_preds_summary, aes(x = time, group = ID)) +
   geom_line(aes(y = pred), linetype = 2, size = 1.05) +
   geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
              color = "red") +
-  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(ng/mL)$"),
                      trans = "log10",
                      limits = c(NA, NA)) +
   scale_x_continuous(name = "Time (h)",
@@ -191,12 +200,12 @@ for(i in 1:ggforce::n_pages(tmp)){
                        filter(!is.na(DV)), 
                      mapping = aes(x = time, y = DV, group = ID),
                      size = 2, color = "red", show.legend = FALSE) +
-          scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+          scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(ng/mL)$"),
                              limits = c(NA, NA),
                              trans = "identity") +
-          scale_x_continuous(name = "Time (h)",
-                             breaks = seq(0, max(nonmem_data$time), by = 14),
-                             labels = seq(0, max(nonmem_data$time), by = 14),
+          scale_x_continuous(name = "Time (w)",
+                             breaks = seq(0, max(nonmem_data$time), by = 24*7),
+                             labels = seq(0, max(nonmem_data$time)/(24*7), by = 1),
                              limits = c(0, max(nonmem_data$time))) +
           theme_bw() +
           theme(axis.text = element_text(size = 14, face = "bold"),
@@ -212,11 +221,11 @@ for(i in 1:ggforce::n_pages(tmp)){
 est_ind <- preds_df %>%
   spread_draws(c(CL, VC, Q, VP, KA, 
                  auc_ss, c_max, t_max, t_half_alpha, t_half_terminal,
-                 KIN, KOUT, IC50, t_min, r_min)[ID]) %>% 
+                 MTT, CIRC0, GAMMA, ALPHA, r_min)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, Q, VP, KA, 
          auc_ss, c_max, t_max, t_half_alpha, t_half_terminal,
-         KIN, KOUT, IC50, t_min, r_min) %>% 
+         MTT, CIRC0, GAMMA, ALPHA, r_min) %>% 
   inner_join(post_preds_summary %>% 
                filter(time == 168, cmt == "PK") %>% 
                select(ID, c_trough = "ipred") %>% 

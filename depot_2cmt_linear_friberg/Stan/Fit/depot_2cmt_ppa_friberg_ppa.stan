@@ -1,5 +1,5 @@
 // First Order Absorption (oral/subcutaneous)
-// Two-compartment PK Model
+// Two-compartment PK Model, Friberg-Karlsson neutropenia PD model
 // IIV on CL, VC, Q, VP, and KA (full covariance matrix)
 // IIV on MTT, CIRC0, GAMMA, ALPHA (full covariance matrix) for PD
 // proportional plus additive error on PK - DV = IPRED*(1 + eps_p) + eps_a

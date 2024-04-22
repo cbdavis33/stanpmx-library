@@ -57,8 +57,8 @@ nonmem_data %>%
     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Response (unit)"),
-                       trans = "log10") + 
+    scale_y_continuous(name = latex2exp::TeX("Neutrophils $(\\times 10^9/L)"),
+                       trans = "identity") +
     scale_x_continuous(name = "Time (h)",
                        breaks = seq(0, max(nonmem_data$time), by = 24),
                        labels = seq(0, max(nonmem_data$time), by = 24),
