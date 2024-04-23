@@ -146,7 +146,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ic50 = 0.4,
                   lkj_df_omega_pd = 2,
                   scale_sigma_pd = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_exp_ir1_exp.stan",
@@ -163,6 +164,8 @@ fit <- model$sample(
   adapt_delta = 0.8,
   refresh = 500,
   max_treedepth = 10,
+  output_dir = "depot_2cmt_linear_ir1/Stan/Fits/Output",
+  output_basename = "exp_exp",
   init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                          TVVC = rlnorm(1, log(18), 0.3),
                          TVQ = rlnorm(1, log(2), 0.3),
@@ -177,4 +180,7 @@ fit <- model$sample(
                          sigma_pd = rlnorm(1, log(0.2), 0.3)))
 
 fit$save_object("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_exp_ir1_exp.rds")
+fit$save_data_file(dir = "depot_2cmt_linear_ir1/Stan/Fits/Stan_Data",
+                   basename = "exp_exp", timestamp = FALSE, random = FALSE)
+
 

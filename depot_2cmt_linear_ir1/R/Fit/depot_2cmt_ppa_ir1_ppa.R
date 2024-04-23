@@ -150,7 +150,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_p_pd = 0.5,
                   scale_sigma_a_pd = 1,
                   lkj_df_sigma_pd = 2,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "depot_2cmt_linear_ir1/Stan/Fit/depot_2cmt_ppa_ir1_ppa.stan",
@@ -167,6 +168,8 @@ fit <- model$sample(
   adapt_delta = 0.8,
   refresh = 100,
   max_treedepth = 10,
+  output_dir = "depot_2cmt_linear_ir1/Stan/Fits/Output",
+  output_basename = "ppa_ppa",
   init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                          TVVC = rlnorm(1, log(18), 0.3),
                          TVQ = rlnorm(1, log(2), 0.3),
@@ -183,4 +186,7 @@ fit <- model$sample(
                                       rlnorm(1, log(0.8), 0.3))))
 
 fit$save_object("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_ppa_ir1_ppa.rds")
+fit$save_data_file(dir = "depot_2cmt_linear_ir1/Stan/Fits/Stan_Data",
+                   basename = "ppa_ppa", timestamp = FALSE, random = FALSE)
+
 
