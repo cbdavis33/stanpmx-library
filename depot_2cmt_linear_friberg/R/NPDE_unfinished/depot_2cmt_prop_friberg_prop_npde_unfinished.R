@@ -12,10 +12,10 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_exp_ir1_exp.rds")
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop.rds")
 
 nonmem_data <- read_csv(
-  "depot_2cmt_linear_ir1/Data/depot_2cmt_exp_ir1_exp.csv",
+  "depot_2cmt_linear_friberg/Data/depot_2cmt_prop_friberg_prop.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -61,7 +61,7 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Predict/depot_2cmt_exp_ir1_exp_predict_new_subjects.stan")
+  "depot_2cmt_linear_friberg/Stan/Predict/depot_2cmt_prop_friberg_prop_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
@@ -81,8 +81,8 @@ ipreds_col <- preds_df %>%
 
 obs <- new_data %>% 
   select(ID, time, dv = "DV", cmt, amt, evid, bloq, mdv) %>% 
-  mutate(dv = case_when(bloq == 1 & cmt == 2 ~ 1,
-                        bloq == 1 & cmt == 4 ~ 2,
+  mutate(dv = case_when(bloq == 1 & cmt == 2 ~ 0.5,
+                        bloq == 1 & cmt == 4 ~ 5,
                         TRUE ~ dv)) %>% 
   left_join(ipreds_col, by = c("ID", "time", "cmt")) %>% 
   filter(evid == 0) 
@@ -97,8 +97,8 @@ sim <- preds_df %>%
          evid = new_data$evid[i],
          bloq = new_data$bloq[i]) %>% 
   filter(evid == 0) %>%
-  mutate(dv = case_when(bloq == 1 & cmt == 2 ~ 1,
-                        bloq == 1 & cmt == 4 ~ 2,
+  mutate(dv = case_when(bloq == 1 & cmt == 2 ~ 0.5,
+                        bloq == 1 & cmt == 4 ~ 5,
                         TRUE ~ dv)) %>%
   arrange(.draw, ID, time, cmt) %>% 
   select(ID, time, cmt, dv, bloq) %>% 

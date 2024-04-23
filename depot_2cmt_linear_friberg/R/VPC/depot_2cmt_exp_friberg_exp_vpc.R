@@ -11,10 +11,10 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_2cmt_linear_ir1/Stan/Fits/depot_2cmt_exp_ir1_exp.rds")
+fit <- read_rds("depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_exp_friberg_exp.rds")
 
 nonmem_data <- read_csv(
-  "depot_2cmt_linear_ir1/Data/depot_2cmt_exp_ir1_exp.csv",
+  "depot_2cmt_linear_friberg/Data/depot_2cmt_exp_friberg_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -61,7 +61,7 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_2cmt_linear_ir1/Stan/Predict/depot_2cmt_exp_ir1_exp_predict_new_subjects.stan")
+  "depot_2cmt_linear_friberg/Stan/Predict/depot_2cmt_exp_friberg_exp_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
@@ -126,8 +126,8 @@ obs <- nonmem_data %>%
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "identity") +
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
+                       breaks = seq(0, 216, by = 24),
+                       labels = seq(0, 216, by = 24)) +
     theme_bw())
 
 (p_pcvpc_pk <- vpc(sim = sim %>% 
@@ -156,8 +156,8 @@ obs <- nonmem_data %>%
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "log10") +
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
+                       breaks = seq(0, 216, by = 24),
+                       labels = seq(0, 216, by = 24)) +
     theme_bw())
 
 p_vpc_pk + 
@@ -189,8 +189,8 @@ p_vpc_pk +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "identity") +
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
+                       breaks = seq(0, 672, by = 168),
+                       labels = seq(0, 672, by = 168)) +
     theme_bw())
 
 (p_pcvpc_pd <- vpc(sim = sim %>% 
@@ -219,8 +219,8 @@ p_vpc_pk +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "log10") +
     scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
+                       breaks = seq(0, 672, by = 168),
+                       labels = seq(0, 672, by = 168)) +
     theme_bw())
 
 p_vpc_pd + 
