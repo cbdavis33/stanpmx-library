@@ -132,8 +132,13 @@ model <- cmdstan_model(
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
+                                   seed = 1234)
 
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(10),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 

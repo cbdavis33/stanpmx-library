@@ -108,7 +108,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_bioav = 0.3,
                   lkj_df_omega = 2,
                   scale_sigma = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "bioav_iv_and_oral_1cmt_linear/Stan/Fit/bioav_iv_and_oral_1cmt_exp.stan",
@@ -124,6 +125,8 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
+                    output_dir = "depot_2cmt_linear_friberg/Stan/Fits/Output",
+                    output_basename = "exp",
                     init = function() list(TVCL = rlnorm(1, log(1), 0.3),
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
@@ -133,3 +136,6 @@ fit <- model$sample(data = stan_data,
 
 fit$save_object(
   "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_exp.rds")
+
+fit$save_data_file(dir = "bioav_iv_and_oral_1cmt_linear/Stan/Fits/Stan_Data",
+                   basename = "exp", timestamp = FALSE, random = FALSE)
