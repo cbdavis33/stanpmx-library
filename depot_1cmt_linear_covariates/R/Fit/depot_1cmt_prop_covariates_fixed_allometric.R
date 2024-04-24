@@ -129,10 +129,12 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0,
+                  theta_cl_wt = 0.75,
+                  theta_vc_wt = 1)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates/Stan/Fit/depot_1cmt_prop_covariates.stan",
+  "depot_1cmt_linear_covariates/Stan/Fit/depot_1cmt_prop_covariates_fixed_allometric.stan",
   cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(data = stan_data,
@@ -146,7 +148,7 @@ fit <- model$sample(data = stan_data,
                     refresh = 500,
                     max_treedepth = 10,
                     output_dir = "depot_1cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "prop_covariates",
+                    output_basename = "prop_covariates_fixed_allometric",
                     init = function() list(TVCL = rlnorm(1, log(1), 0.3),
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
@@ -158,8 +160,8 @@ fit <- model$sample(data = stan_data,
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 
 fit$save_object(
-  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_covariates.rds")
+  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_covariates_fixed_allometric.rds")
 
 fit$save_data_file(dir = "depot_1cmt_linear_covariates/Stan/Fits/Stan_Data",
-                   basename = "prop_covariates", timestamp = FALSE, 
+                   basename = "prop_covariates_fixed_allometric", timestamp = FALSE, 
                    random = FALSE)

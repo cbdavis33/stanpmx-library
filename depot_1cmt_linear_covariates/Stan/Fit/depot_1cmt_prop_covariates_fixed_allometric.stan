@@ -10,7 +10,8 @@
 //   truncates the likelihood below at 0
 // For PPC, it generates values from a normal that is truncated below at 0
 // Covariates: 
-//   1) Body Weight on CL and VC - (wt/70)^theta
+//   1) Body Weight on CL and VC - (wt/70)^theta - theta is fixed at a 
+//         user-chosen value (typically 0.75 and 1 for CL and VC, respectively)
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
 //.     on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
@@ -194,6 +195,9 @@ data{
                                                         // generated quantities. Useful
                                                         // for simulating prior parameters
                                                         // but don't want prior predictions
+                                                        
+  real theta_cl_wt; // typically this will be 0.75, sometimes 0.85
+  real theta_vc_wt; // typically this will be 1
  
 }
 transformed data{ 
@@ -224,8 +228,6 @@ parameters{
   real<lower = 0> TVVC; 
   real<lower = TVCL/TVVC> TVKA;
   
-  real theta_cl_wt;
-  real theta_vc_wt;
   real theta_ka_cmppi;
   real theta_cl_egfr;
   
@@ -285,10 +287,8 @@ model{
   TVVC ~ lognormal(log(location_tvvc), scale_tvvc);
   TVKA ~ lognormal(log(location_tvka), scale_tvka) T[TVCL/TVVC, ];
   
-  theta_cl_wt ~ std_normal();
-  theta_vc_wt ~ std_normal();
-  theta_ka_cmppi ~ std_normal();
-  theta_cl_egfr ~ std_normal();
+  theta_ka_cmppi ~ std_normal(); // Can change to normal(location, scale) if desired
+  theta_cl_egfr ~ std_normal();  // Can change to normal(location, scale) if desired
 
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
