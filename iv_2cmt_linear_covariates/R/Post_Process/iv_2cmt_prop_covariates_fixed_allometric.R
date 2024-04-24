@@ -11,7 +11,7 @@ library(posterior)
 library(tidyverse)
 
 nonmem_data <- read_csv(
-  "iv_2cmt_linear_covariates/Data/iv_2cmt_exp_covariates.csv",
+  "iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -30,14 +30,13 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_exp_covariates.rds")
+fit <- read_rds("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_covariates_fixed_allometric.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
-                             str_subset(fit$metadata()$stan_variables, "theta"),
                              str_c("omega_", c("cl", "vc", "q", "vp")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             "sigma")
+                             "sigma_p")
 
 summary <- summarize_draws(fit$draws(parameters_to_summarize), 
                            mean, median, sd, mcse_mean,
@@ -73,21 +72,17 @@ summary %>%
 # Density Plots and Traceplots
 mcmc_combo(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                       "theta_q_wt", "theta_vp_wt",
-                       "theta_vc_race_asian", "theta_cl_egfr")),
+mcmc_combo(fit$draws(c("theta_vc_race_asian", "theta_cl_egfr")),
            combo = c("dens_overlay", "trace"))
 mcmc_combo(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp")),
            combo = c("dens_overlay", "trace"))
-mcmc_combo(fit$draws(c("sigma")),
+mcmc_combo(fit$draws(c("sigma_p")),
            combo = c("dens_overlay", "trace"))
 
 mcmc_rank_hist(fit$draws(c("TVCL", "TVVC", "TVQ", "TVVP")))
-mcmc_rank_hist(fit$draws(c("theta_cl_wt", "theta_vc_wt", 
-                           "theta_q_wt", "theta_vp_wt",
-                           "theta_vc_race_asian", "theta_cl_egfr")))
+mcmc_rank_hist(fit$draws(c("theta_vc_race_asian", "theta_cl_egfr")))
 mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_q", "omega_vp")))
-mcmc_rank_hist(fit$draws(c("sigma")))
+mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
 fit_loo <- fit$loo(cores = min(4, parallel::detectCores()/2))

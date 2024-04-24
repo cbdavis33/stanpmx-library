@@ -10,7 +10,8 @@
 //   truncates the likelihood below at 0
 // For PPC, it generates values from a normal that is truncated below at 0
 // Covariates: 
-//   1) Body Weight on CL, VC, Q, VP - (wt/70)^theta
+//   1) Body Weight on CL and VC - (wt/70)^theta - theta is fixed at a 
+//         user-chosen value (typically 0.75 and 1 for CL and VC, respectively)
 //   2) Race = Asian on VC (0/1) - exp(theta*race_asian)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
 
@@ -221,6 +222,11 @@ data{
                                                         // generated quantities. Useful
                                                         // for simulating prior parameters
                                                         // but don't want prior predictions
+                                                        
+  real theta_cl_wt; // typically this will be 0.75, sometimes 0.85
+  real theta_vc_wt; // typically this will be 1
+  real theta_q_wt;  // typically this will be 0.75, sometimes 0.85
+  real theta_vp_wt; // typically this will be 1
  
 }
 transformed data{ 
@@ -252,10 +258,6 @@ parameters{
   real<lower = 0> TVQ;       
   real<lower = 0> TVVP;
   
-  real theta_cl_wt;         // allometric scaling coefficient for wt on clearance
-  real theta_vc_wt;         // allometric scaling coefficient for wt on VC
-  real theta_q_wt;          // allometric scaling coefficient for wt on Q
-  real theta_vp_wt;         // allometric scaling coefficient for wt on VP
   real theta_vc_race_asian; // effect of race (asian) on VC 
   real theta_cl_egfr;       // effect of eGFR on clearance
   
@@ -320,12 +322,8 @@ model{
   TVQ ~ lognormal(log(location_tvq), scale_tvq);
   TVVP ~ lognormal(log(location_tvvp), scale_tvvp);
   
-  theta_cl_wt ~ std_normal();
-  theta_vc_wt ~ std_normal();
-  theta_q_wt ~ std_normal();
-  theta_vp_wt ~ std_normal();
-  theta_vc_race_asian ~ std_normal();
-  theta_cl_egfr ~ std_normal();
+  theta_vc_race_asian ~ std_normal(); // Can change to normal(location, scale) if desired
+  theta_cl_egfr ~ std_normal(); // Can change to normal(location, scale) if desired
   
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);

@@ -144,11 +144,16 @@ stan_data <- list(n_subjects = n_subjects,
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Predict/iv_2cmt_prop_predict_new_subjects_covariates.stan")
 
-preds <- model$generate_quantities(fit,
+# preds <- model$generate_quantities(fit,
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
+
+preds <- model$generate_quantities(fit$draws() %>%
+                                     thin_draws(100),
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
-
+                                   seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 

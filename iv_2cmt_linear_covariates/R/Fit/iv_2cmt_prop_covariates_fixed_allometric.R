@@ -112,11 +112,11 @@ stan_data <- list(n_subjects = n_subjects,
                   dv = nonmem_data$DV,
                   subj_start = subj_start,
                   subj_end = subj_end,
+                  lloq = nonmem_data$lloq,
+                  bloq = nonmem_data$bloq,
                   wt = wt,
                   race_asian = race_asian,
                   egfr = egfr,
-                  lloq = nonmem_data$lloq,
-                  bloq = nonmem_data$bloq,
                   location_tvcl = 0.25,
                   location_tvvc = 3,
                   location_tvq = 1,
@@ -131,13 +131,15 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_vp = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
-                  scale_sigma_a = 0.5,
-                  lkj_df_sigma = 2,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0,
+                  theta_cl_wt = 0.75,
+                  theta_vc_wt = 1,
+                  theta_q_wt = 0.75,
+                  theta_vp_wt = 1)
 
 model <- cmdstan_model(
-  "iv_2cmt_linear_covariates/Stan/Fit/iv_2cmt_ppa_covariates.stan",
+  "iv_2cmt_linear_covariates/Stan/Fit/iv_2cmt_prop_covariates_fixed_allometric.stan",
   cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(data = stan_data,
@@ -151,22 +153,20 @@ fit <- model$sample(data = stan_data,
                     refresh = 500,
                     max_treedepth = 10,
                     output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "ppa_covariates",
+                    output_basename = "prop_covariates",
                     init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
                                            TVVC = rlnorm(1, log(3), 0.3),
                                            TVQ = rlnorm(1, log(1), 0.3),
                                            TVVP = rlnorm(1, log(4), 0.3),
-                                           theta_cl_wt = rnorm(1), 
-                                           theta_vc_wt = rnorm(1), 
-                                           theta_q_wt = rnorm(1), 
-                                           theta_vp_wt = rnorm(1), 
                                            theta_vc_race_asian = rnorm(1), 
                                            theta_cl_egfr = rnorm(1),
                                            omega = rlnorm(4, log(0.3), 0.3),
-                                           sigma = rlnorm(2, log(0.4), 0.3)))
+                                           sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_ppa_covariates.rds")
+fit$save_object(
+  "iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_covariates_fixed_allometric.rds")
 
 fit$save_data_file(dir = "iv_2cmt_linear_covariates/Stan/Fits/Stan_Data",
-                   basename = "ppa_covariates", timestamp = FALSE, random = FALSE)
+                   basename = "prop_covariates_fixed_allometric", 
+                   timestamp = FALSE, random = FALSE)
 
