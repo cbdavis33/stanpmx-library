@@ -172,6 +172,10 @@ data{
   real<lower = 0> scale_sigma;    // Prior Scale parameter for exponential error
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
+  int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
+                                                        // generated quantities. Useful
+                                                        // for simulating prior parameters
+                                                        // but don't want prior predictions
   
 }
 transformed data{ 
@@ -314,11 +318,6 @@ generated quantities{
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
 
-    vector[n_total] dv_pred;
-    matrix[n_total, n_cmt] x_pred;
-    vector[n_total] dv_ipred;
-    matrix[n_total, n_cmt] x_ipred;
-
     cor_cl_vc = R[1, 2];
     cor_cl_ka = R[1, 3];
     cor_cl_dur = R[1, 4];
@@ -332,6 +331,15 @@ generated quantities{
     omega_vc_ka = Omega[2, 3];
     omega_vc_dur = Omega[2, 4];
     omega_ka_dur = Omega[3, 4];
+    
+  }
+
+  if(no_gq_predictions == 0){
+    
+    vector[n_total] dv_pred;
+    matrix[n_total, n_cmt] x_pred;
+    vector[n_total] dv_ipred;
+    matrix[n_total, n_cmt] x_ipred;
 
     for(j in 1:n_subjects){
       
@@ -384,22 +392,20 @@ generated quantities{
     pred = dv_pred[i_obs];
     ipred = dv_ipred[i_obs];
 
-  }
+    res = log(dv_obs) - log(pred);
+    ires = log(dv_obs) - log(ipred);
 
-  res = log(dv_obs) - log(pred);
-  ires = log(dv_obs) - log(ipred);
-
-  for(i in 1:n_obs){
-    real log_ipred_tmp = log(ipred[i]);
-    dv_ppc[i] = lognormal_rng(log_ipred_tmp, sigma);
-    if(bloq_obs[i] == 1){
-      log_lik[i] = lognormal_lcdf(lloq_obs[i] | log_ipred_tmp, sigma);
-    }else{
-      log_lik[i] = lognormal_lpdf(dv_obs[i] | log_ipred_tmp, sigma);
+    for(i in 1:n_obs){
+      real log_ipred_tmp = log(ipred[i]);
+      dv_ppc[i] = lognormal_rng(log_ipred_tmp, sigma);
+      if(bloq_obs[i] == 1){
+        log_lik[i] = lognormal_lcdf(lloq_obs[i] | log_ipred_tmp, sigma);
+      }else{
+        log_lik[i] = lognormal_lpdf(dv_obs[i] | log_ipred_tmp, sigma);
+      }
+      wres[i] = res[i]/sigma;
+      iwres[i] = ires[i]/sigma;
     }
-    wres[i] = res[i]/sigma;
-    iwres[i] = ires[i]/sigma;
   }
-  
 }
 

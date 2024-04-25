@@ -98,6 +98,12 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
+
 preds_df <- preds$draws(format = "draws_df")
 
 rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data")))
@@ -171,9 +177,9 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Individual estimates (posterior mean)
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], DUR[ID],
-               auc_ss[ID], c_max[ID], t_max[ID], 
-               t_half_alpha[ID], t_half_terminal[ID]) %>% 
+  spread_draws(c(CL, VC, Q, VP, KA, DUR,
+                 auc_ss, c_max, t_max, 
+                 t_half_alpha, t_half_terminal)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, Q, VP, KA, DUR,
          auc_ss, c_max, t_max, t_half_alpha, t_half_terminal) %>% 
