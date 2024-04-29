@@ -238,6 +238,10 @@ data{
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
+  int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
+                                                        // generated quantities. Useful
+                                                        // for simulating prior parameters
+                                                        // but don't want prior predictions
  
 }
 transformed data{ 
@@ -386,7 +390,7 @@ generated quantities{
   // Normally this is where I'd try to return named correlations and covariances
   // (e.g. cor_cl_ka, omega_cl_ka), but since n_depots can vary, there's no 
   // good way to return them. It'll just have to be the whole correlation matrix
-  // and whole covariance matrix
+  // and whole covariance matrix, and the user should sort it out in R
   
   matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
   matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
@@ -400,7 +404,7 @@ generated quantities{
   vector[n_obs] ires;
   vector[n_obs] iwres;
  
-  {
+  if(no_gq_predictions == 0){
 
     vector[n_total] dv_pred;
     matrix[n_total, n_cmt] x_pred;
@@ -435,8 +439,6 @@ generated quantities{
         if(is_inf(rate_p[i])) rate_p[i] = 0;
       
       }
-      
-
         
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
       matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
@@ -488,29 +490,27 @@ generated quantities{
     pred = dv_pred[i_obs];
     ipred = dv_ipred[i_obs];
 
-  }
+    res = dv_obs - pred;
+    ires = dv_obs - ipred;
 
-  res = dv_obs - pred;
-  ires = dv_obs - ipred;
-
-  for(i in 1:n_obs){
-    real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
-    dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-    if(bloq_obs[i] == 1){
-      // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
-      //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
-      //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
-                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-    }else{
-      log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+    for(i in 1:n_obs){
+      real ipred_tmp = ipred[i];
+      real sigma_tmp = ipred_tmp*sigma_p;
+      dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      if(bloq_obs[i] == 1){
+        // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
+        //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
+        //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+        log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
+                                  normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }else{
+        log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }
+      wres[i] = res[i]/sigma_tmp;
+      iwres[i] = ires[i]/sigma_tmp;
     }
-    wres[i] = res[i]/sigma_tmp;
-    iwres[i] = ires[i]/sigma_tmp;
   }
-  
 }
 

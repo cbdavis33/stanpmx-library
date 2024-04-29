@@ -18,7 +18,7 @@ n_depots_with_delay <- n_depots - 1 # "n_depots - 1" means no delay on the
 with_or_without_delay_string <- if_else(n_depots_with_delay == n_depots, 
                                         "with_initial_delay", 
                                         "no_initial_delay")
-prior_string <- "prior_ka1_dur1"
+prior_string <- "prior_ka1_durn"
 
 fit <- read_rds(
   file.path("parallel_first_order_1cmt_linear",
@@ -129,10 +129,16 @@ model <- cmdstan_model(
             "Predict",
             "parallel_first_order_1cmt_prop_predict_new_subjects.stan"))
 
-preds <- model$generate_quantities(fit,
+# preds <- model$generate_quantities(fit,
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
+
+preds <- model$generate_quantities(fit$draws() %>%
+                                     thin_draws(100),
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
+                                   seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 
@@ -227,7 +233,7 @@ post_preds_summary %>%
   facet_wrap(~ regimen, scales = "free_y")
 
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+  spread_draws(c(CL, VC, c_max, t_max, t_half)[ID]) %>% 
   median_qi() %>% 
   inner_join(preds_df %>%
                gather_draws(KA[ID, Depot], DUR[ID, Depot]) %>% 

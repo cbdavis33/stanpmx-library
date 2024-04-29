@@ -134,6 +134,12 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
+preds <- model$generate_quantities(fit$draws() %>%
+                                     thin_draws(100),
+                                   data = stan_data,
+                                   parallel_chains = 4,
+                                   seed = 1234)
+
 preds_df <- preds$draws(format = "draws_df")
 
 regimens <- str_c(c(100, 200, 400, 800), " mg")
@@ -227,7 +233,7 @@ post_preds_summary %>%
   facet_wrap(~ regimen, scales = "free_y")
 
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+  spread_draws(c(CL, VC, c_max, t_max, t_half)[ID]) %>% 
   median_qi() %>% 
   inner_join(preds_df %>%
                gather_draws(KA[ID, Depot], DUR[ID, Depot]) %>% 
