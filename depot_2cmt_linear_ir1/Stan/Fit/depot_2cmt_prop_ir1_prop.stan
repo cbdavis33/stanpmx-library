@@ -304,6 +304,10 @@ data{
   real<lower = 0> scale_sigma_p_pd;  // Prior Scale parameter for proportional error for PD
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
+  int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
+                                                        // generated quantities. Useful
+                                                        // for simulating prior parameters
+                                                        // but don't want prior predictions
  
 }
 transformed data{ 
@@ -543,13 +547,6 @@ generated quantities{
                                        multiply_lower_tri_self_transpose(L_pd);
     matrix[n_random_pd, n_random_pd] Omega_pd = quad_form_diag(R_pd, omega_pd);
 
-    vector[n_total] dv_pred;
-    matrix[n_total, n_cmt + n_cmt_pd] x_pred;
-    vector[n_total] dv_ipred;
-    matrix[n_total, n_cmt + n_cmt_pd] x_ipred;
-    
-    real TVR0 = TVKIN/TVKOUT;
-
     cor_cl_vc = R[1, 2];
     cor_cl_q = R[1, 3];
     cor_cl_vp = R[1, 4];
@@ -579,6 +576,17 @@ generated quantities{
     omega_kin_kout = Omega_pd[1, 2];
     omega_kin_ic50 = Omega_pd[1, 3];
     omega_kout_ic50 = Omega_pd[2, 3];
+    
+  }
+  
+  if(no_gq_predictions == 0){
+    
+    vector[n_total] dv_pred;
+    matrix[n_total, n_cmt + n_cmt_pd] x_pred;
+    vector[n_total] dv_ipred;
+    matrix[n_total, n_cmt + n_cmt_pd] x_ipred;
+    
+    real TVR0 = TVKIN/TVKOUT;
 
     for(j in 1:n_subjects){
       
@@ -627,32 +635,30 @@ generated quantities{
     pred = dv_pred[i_obs];
     ipred = dv_ipred[i_obs];
 
-  }
+    res = dv_obs - pred;
+    ires = dv_obs - ipred;
 
-  res = dv_obs - pred;
-  ires = dv_obs - ipred;
-
-  for(i in 1:n_obs){
-    
-    if(cmt[i_obs[i]] == 2 || cmt[i_obs[i]] == 4){
-      real ipred_tmp = ipred[i];
-      real sigma_tmp = cmt[i_obs[i]] == 2 ? ipred_tmp*sigma_p : ipred_tmp*sigma_p_pd;
-    
-      dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-    
-      if(bloq_obs[i] == 1){
-        log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
-                                  normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
-                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      }else{
-        log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
-                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      }
-    
-      wres[i] = res[i]/sigma_tmp;
-      iwres[i] = ires[i]/sigma_tmp;
-    }  
+    for(i in 1:n_obs){
+      
+      if(cmt[i_obs[i]] == 2 || cmt[i_obs[i]] == 4){
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = cmt[i_obs[i]] == 2 ? ipred_tmp*sigma_p : ipred_tmp*sigma_p_pd;
+      
+        dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      
+        if(bloq_obs[i] == 1){
+          log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
+                                    normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                       normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+        }else{
+          log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
+                       normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+        }
+      
+        wres[i] = res[i]/sigma_tmp;
+        iwres[i] = ires[i]/sigma_tmp;
+      }  
+    }
   }
-  
 }
 

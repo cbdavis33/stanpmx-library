@@ -83,7 +83,7 @@ mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka", "omega_mtt")))
 mcmc_rank_hist(fit$draws(c("sigma")))
 
 ## Check Leave-One-Out Cross-Validation
-fit_loo <- fit$loo()
+fit_loo <- fit$loo(cores = min(4, parallel::detectCores()/2))
 fit_loo
 plot(fit_loo, label_points = TRUE)
 
@@ -91,7 +91,7 @@ draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
-  spread_draws(pred[i], ipred[i], dv_ppc[i]) %>%
+  spread_draws(c(pred, ipred, dv_ppc)[i]) %>%
   mean_qi(pred, ipred, dv_ppc) %>%
   mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
@@ -178,7 +178,7 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Look at residuals and epsilon shrinkage
 residuals <- draws_df %>%
-  spread_draws(res[i], wres[i], ires[i], iwres[i], ipred[i]) %>% 
+  spread_draws(c(res, wres, ires, iwres, ipred)[i]) %>% 
   mutate(time = nonmem_data$time[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i])
 
@@ -328,7 +328,7 @@ iwres_mean %>%
 # We can look at individual posterior densities on top of the density of the 
 # population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], MTT[ID], 
+  gather_draws(c(CL, VC, KA, MTT)[ID], 
                TVCL, TVVC, TVKA, TVMTT) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
@@ -362,29 +362,23 @@ ggplot() +
 
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", "KA", "MTT"),
-                           pop_est, std_dev, ind_params, ...){
+plot_shrinkage <- function(.variable, std_dev, ind_params, ...){
   
   dots <- list(...)
   
-  .variable <- match.arg(.variable)
-  
-  x_label <- case_when(.variable == "CL" ~ "Clearance (L/h)",
-                       .variable == "VC" ~ "Central Compartment Volume (L)",
-                       .variable == "KA" ~ "Absorption Rate Constant (1/h)",
-                       .variable == "MTT" ~ "Mean Transit Time (h)",
-                       .default = NA_character_ )
+  x_label <- glue::glue("$\\eta_{[.variable]}$", .open = "[", .close = "]")
   
   p_1 <- ggplot() +
     geom_histogram(aes(x = ind_params$ind_params,
                        y = after_stat(density))) +
-    stat_function(fun = dlnorm, 
-                  args = list(meanlog = log(pop_est), sd = std_dev),
+    stat_function(fun = dnorm, 
+                  args = list(mean = 0, sd = std_dev),
                   color = "red", linewidth = 1) +
-    scale_x_continuous(name = x_label,
-                       limits = c(qlnorm(c(0.001, 0.995), 
-                                         log(pop_est), std_dev))) +
+    scale_x_continuous(name = latex2exp::TeX(x_label),
+                       limits = c(qnorm(c(0.001, 0.995), 
+                                        0, std_dev))) +
     theme_bw()
+  
   
   if(is.numeric(dots$.draw)){
     
@@ -416,7 +410,7 @@ plot_shrinkage_multiple <- function(draw){
     ungroup() %>% 
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
-                gather_draws(omega_cl, omega_vc, omega_ka, omega_mtt) %>% 
+                gather_draws(`omega_.*`, regex = TRUE) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -431,20 +425,16 @@ draws_for_shrinkage <- draws_df %>%
   sample_draws(4)
 
 data_shrinkage_by_draw <- draws_for_shrinkage %>%
-  gather_draws(`TV.*`, regex = TRUE) %>%
-  # summarize(estimate = mean(.value)) %>%
-  ungroup() %>%
-  mutate(.variable = str_remove(.variable, "TV")) %>%
-  rename(pop_est = .value) %>%
+  gather_draws(`omega_.*`, regex = TRUE) %>%
+  mutate(.variable = str_remove(.variable, "omega_") %>%
+           toupper()) %>%
+  rename(std_dev = .value) %>%
+  ungroup() %>% 
   inner_join(draws_for_shrinkage %>%
-               gather_draws(omega_cl, omega_vc, omega_ka, omega_mtt) %>%
-               mutate(.variable = str_remove(.variable, "omega_") %>%
-                        toupper()) %>%
-               rename(std_dev = .value),
-             by = c(".draw", ".chain", ".iteration", ".variable")) %>%
-  inner_join(draws_for_shrinkage %>%
-               gather_draws(CL[ID], VC[ID], KA[ID], MTT[ID]) %>%
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>%
                ungroup()  %>% 
+               mutate(.variable = str_remove(.variable, "eta_") %>%
+                        toupper()) %>%
                rename(ind_params = `.value`) %>%
                select(-ID) %>%
                group_by(.draw) %>%
@@ -460,7 +450,6 @@ map(data_shrinkage_by_draw %>%
     .f = plot_shrinkage_multiple) %>% 
   wrap_plots(ncol = 1)
 
-
 ## Some might calculate shrinkage this way based on point estimates, but I don't
 ## think this is the right way to go about it, because it uses point estimates
 ## rather than the full posterior, but here it is, anyways
@@ -474,28 +463,24 @@ draws_df %>%
   ungroup() %>% 
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
-              gather_draws(omega_cl, omega_vc, omega_ka, omega_mtt) %>% 
+              gather_draws(`omega_.*`, regex = TRUE) %>%
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
             by = ".variable") %>% 
   mutate(shrinkage = 1 - std_dev/estimate)
 
-data_shrinkage_with_point_estimates <- draws_df %>%
-  gather_draws(`TV.*`, regex = TRUE) %>%
-  summarize(pop_est = mean(.value)) %>% 
-  ungroup() %>% 
-  mutate(.variable = str_remove(.variable, "TV")) %>% 
-  inner_join(draws_df %>% 
-               gather_draws(omega_cl, omega_vc, omega_ka, omega_mtt) %>% 
-               summarize(std_dev = mean(.value)) %>% 
-               mutate(.variable = str_remove(.variable, "omega_") %>% 
-                        toupper()),
-             by = ".variable") %>% 
+data_shrinkage_with_point_estimates <- draws_df %>% 
+  gather_draws(`omega_.*`, regex = TRUE) %>%
+  summarize(std_dev = mean(.value)) %>% 
+  mutate(.variable = str_remove(.variable, "omega_") %>% 
+           toupper()) %>% 
   inner_join(draws_df %>%
-               gather_draws(CL[ID], VC[ID], KA[ID], MTT[ID]) %>% 
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
+               mutate(.variable = str_remove(.variable, "eta_") %>%
+                        toupper()) %>%
                select(-ID) %>% 
                nest(ind_params = ind_params), 
              by = ".variable")
@@ -507,8 +492,7 @@ pmap(data_shrinkage_with_point_estimates,
 
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(CL[ID], VC[ID], KA[ID], MTT[ID],
-               eta_cl[ID], eta_vc[ID], eta_ka[ID], eta_mtt[ID]) %>% 
+  spread_draws(c(CL, VC, KA, MTT, eta_cl, eta_vc, eta_ka, eta_mtt)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, KA, MTT,
          eta_cl, eta_vc, eta_ka, eta_mtt) %>% 

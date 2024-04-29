@@ -276,6 +276,11 @@ data{
   int<lower = 0, upper = 1> prior_only;
   
   int<lower = 1, upper = 4> solver; // 1 = rk45, 2 = bdf, 3 = adams, 4 = ckrk
+  
+  int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
+                                                        // generated quantities. Useful
+                                                        // for simulating prior parameters
+                                                        // but don't want prior predictions
  
 }
 transformed data{ 
@@ -500,11 +505,6 @@ generated quantities{
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
 
-    vector[n_total] dv_ipred;
-    array[n_total] vector[n_cmt] x_ipred;
-    vector[n_total] dv_pred;
-    array[n_total] vector[n_cmt] x_pred;
-
     cor_cl_vc = R[1, 2];
     cor_cl_q = R[1, 3];
     cor_cl_vp = R[1, 4];
@@ -548,6 +548,15 @@ generated quantities{
     omega_ka_ntr = Omega[5, 6];
     omega_ka_mtt = Omega[5, 7];
     omega_ntr_mtt = Omega[6, 7];
+    
+  }
+
+  if(no_gq_predictions == 0){
+    
+    vector[n_total] dv_ipred;
+    array[n_total] vector[n_cmt] x_ipred;
+    vector[n_total] dv_pred;
+    array[n_total] vector[n_cmt] x_pred;
 
     for(j in 1:n_subjects){
 
@@ -621,32 +630,30 @@ generated quantities{
 
     pred = dv_pred[i_obs];
     ipred = dv_ipred[i_obs];
+    
+    res = dv_obs - pred;
+    ires = dv_obs - ipred;
 
-  }
-
-  res = dv_obs - pred;
-  ires = dv_obs - ipred;
-
-  for(i in 1:n_obs){
-    real ipred_tmp = ipred[i];
-    real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
-                          2*ipred_tmp*sigma_p_a);
-    dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-    if(bloq_obs[i] == 1){
-      // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
-      //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
-      //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
-                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-    }else{
-      log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+    for(i in 1:n_obs){
+      real ipred_tmp = ipred[i];
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                            2*ipred_tmp*sigma_p_a);
+      dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      if(bloq_obs[i] == 1){
+        // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
+        //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
+        //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+        log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
+                                  normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }else{
+        log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }
+      wres[i] = res[i]/sigma_tmp;
+      iwres[i] = ires[i]/sigma_tmp;
     }
-    wres[i] = res[i]/sigma_tmp;
-    iwres[i] = ires[i]/sigma_tmp;
   }
-  
 }
 
 

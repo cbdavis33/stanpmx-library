@@ -35,8 +35,8 @@ new_data_to_simulate <- nonmem_data %>%
   # filter(evid == 0) %>%
   group_by(ID) %>% 
   slice(c(1, n())) %>% 
-  expand(time = seq(time[1], time[2], by = 1)) %>%
-  # expand(time = seq(time[1], time[2], by = 2)) %>%
+  # expand(time = seq(time[1], time[2], by = 1)) %>%
+  expand(time = seq(time[1], time[2], by = 2)) %>%
   ungroup() %>% 
   mutate(amt = 0,
          evid = 2,
@@ -111,6 +111,12 @@ preds <- model$generate_quantities(fit,
                                    data = stan_data,
                                    parallel_chains = 4,
                                    seed = 1234) 
+
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 

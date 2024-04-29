@@ -124,6 +124,11 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
+# preds <- model$generate_quantities(fit,
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
+
 preds_df <- preds$draws(format = "draws_df")
 
 rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data")))
@@ -195,8 +200,10 @@ for(i in 1:ggforce::n_pages(tmp)){
 }
 
 ## Individual estimates (posterior mean)
+# Note that this t_half is calculated by log(2)/KE, which doesn't work
+# correctly for this model with KA < KE. Be careful here
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+  spread_draws(c(CL, VC, c_max, t_max, t_half)[ID]) %>% 
   mean_qi() %>% 
   inner_join(preds_df %>%
                gather_draws(KA[ID, Depot], DUR[ID, Depot]) %>% 

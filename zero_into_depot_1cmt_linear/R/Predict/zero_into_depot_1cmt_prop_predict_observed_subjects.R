@@ -93,10 +93,16 @@ stan_data <- list(n_subjects = n_subjects,
 model <- cmdstan_model(
   "zero_into_depot_1cmt_linear/Stan/Predict/zero_into_depot_1cmt_prop_predict_observed_subjects.stan")
 
-preds <- model$generate_quantities(fit,
+# preds <- model$generate_quantities(fit,
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234) 
+
+preds <- model$generate_quantities(fit$draws() %>%
+                                     thin_draws(100),
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234) 
+                                   seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 
@@ -152,8 +158,9 @@ for(i in 1:ggforce::n_pages(tmp)){
           geom_line(aes(y = pred), linetype = 2, size = 1.05) +
           geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
                      color = "red") +
-          scale_y_log10(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                        limits = c(NA, NA)) +
+          scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+                             trans = "identity",
+                             limits = c(NA, NA)) +
           scale_x_continuous(name = "Time (h)",
                              breaks = seq(0, 168, by = 24),
                              labels = seq(0, 168, by = 24),
@@ -170,8 +177,8 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Individual estimates (posterior mean)
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], KA[ID], DUR[ID],
-               auc_ss[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+  spread_draws(c(CL, VC, KA, DUR,
+                 auc_ss, c_max, t_max, t_half)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, KA, DUR,
          auc_ss, c_max, t_max, t_half) %>% 

@@ -141,6 +141,12 @@ stan_data <- list(n_subjects = n_subjects,
                   t_1 = 70,
                   t_2 = 84)
 
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
+
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Predict/iv_2cmt_ppa_predict_new_subjects_covariates.stan")
 

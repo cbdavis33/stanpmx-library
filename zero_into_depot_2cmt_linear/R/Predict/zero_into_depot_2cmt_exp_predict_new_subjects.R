@@ -97,6 +97,12 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
+
 preds_df <- preds$draws(format = "draws_df")
 
 regimens <- str_c(c(50, 100, 200, 400, 600, 800), " mg")

@@ -110,7 +110,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_p = 0.5,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "bioav_iv_and_oral_1cmt_linear/Stan/Fit/bioav_iv_and_oral_1cmt_ppa.stan",
@@ -126,6 +127,8 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
+                    output_dir = "bioav_iv_and_oral_1cmt_linear/Stan/Fits/Output",
+                    output_basename = "ppa",
                     init = function() list(TVCL = rlnorm(1, log(1), 0.3),
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
@@ -136,3 +139,5 @@ fit <- model$sample(data = stan_data,
 fit$save_object(
   "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_ppa.rds")
 
+fit$save_data_file(dir = "bioav_iv_and_oral_1cmt_linear/Stan/Fits/Stan_Data",
+                   basename = "ppa", timestamp = FALSE, random = FALSE)

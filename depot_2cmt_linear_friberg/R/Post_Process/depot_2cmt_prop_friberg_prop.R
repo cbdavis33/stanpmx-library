@@ -95,11 +95,11 @@ mcmc_rank_hist(fit$draws(c("omega_mtt", "omega_circ0", "omega_gamma", "omega_alp
 mcmc_rank_hist(fit$draws("sigma_p_pd"))
 
 ## Check Leave-One-Out Cross-Validation
-fit_loo <- fit$loo()
+fit_loo <- fit$loo(cores = parallel::detectCores()/2)
 fit_loo
 plot(fit_loo, label_points = TRUE)
 
-draws_df <- fit$draws(format = "draws_df") %>% filter(.chain == 4)
+draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
@@ -533,13 +533,9 @@ ggplot() +
 
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", "Q", "VP", "KA", 
-                                         "MTT", "CIRC0", "GAMMA", "ALPHA"),
-                           std_dev, ind_params, ...){
+plot_shrinkage <- function(.variable, std_dev, ind_params, ...){
   
   dots <- list(...)
-  
-  .variable <- match.arg(.variable)
   
   x_label <- glue::glue("$\\eta_{[.variable]}$", .open = "[", .close = "]")
   
@@ -584,8 +580,7 @@ plot_shrinkage_multiple <- function(draw){
     ungroup() %>% 
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
-                gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-                             omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
+                gather_draws(`omega_.*`, regex = TRUE) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -600,15 +595,13 @@ draws_for_shrinkage <- draws_df %>%
   sample_draws(4)
 
 data_shrinkage_by_draw <- draws_for_shrinkage %>%
-  gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-               omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>%
+  gather_draws(`omega_.*`, regex = TRUE) %>%
   mutate(.variable = str_remove(.variable, "omega_") %>%
            toupper()) %>%
   rename(std_dev = .value) %>%
   ungroup() %>% 
   inner_join(draws_for_shrinkage %>%
-               gather_draws(c(eta_cl, eta_vc, eta_q, eta_vp, eta_ka,
-                              eta_mtt, eta_circ0, eta_gamma, eta_alpha)[ID]) %>%
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>%
                ungroup()  %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -641,8 +634,7 @@ draws_df %>%
   ungroup() %>% 
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
-              gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-                           omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
+              gather_draws(`omega_.*`, regex = TRUE) %>%
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
@@ -650,14 +642,12 @@ draws_df %>%
   mutate(shrinkage = 1 - std_dev/estimate)
 
 data_shrinkage_with_point_estimates <- draws_df %>% 
-  gather_draws(omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-               omega_mtt, omega_circ0, omega_gamma, omega_alpha) %>% 
+  gather_draws(`omega_.*`, regex = TRUE) %>%
   summarize(std_dev = mean(.value)) %>% 
   mutate(.variable = str_remove(.variable, "omega_") %>% 
            toupper()) %>% 
   inner_join(draws_df %>%
-               gather_draws(c(eta_cl, eta_vc, eta_q, eta_vp, eta_ka,
-                              eta_mtt, eta_circ0, eta_gamma, eta_alpha)[ID]) %>%
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%

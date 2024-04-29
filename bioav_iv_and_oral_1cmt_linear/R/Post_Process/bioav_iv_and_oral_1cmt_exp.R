@@ -91,7 +91,7 @@ draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
-  spread_draws(pred[i], ipred[i], dv_ppc[i]) %>%
+  spread_draws(c(pred, ipred, dv_ppc)[i]) %>%
   mean_qi(pred, ipred, dv_ppc) %>%
   mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
@@ -178,7 +178,7 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Look at residuals and epsilon shrinkage
 residuals <- draws_df %>%
-  spread_draws(res[i], wres[i], ires[i], iwres[i], ipred[i]) %>% 
+  spread_draws(c(res, wres, ires, iwres, ipred)[i]) %>% 
   mutate(time = nonmem_data$time[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i])
 
@@ -328,7 +328,7 @@ iwres_mean %>%
 # We can look at individual posterior densities on top of the density of the 
 # population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], BIOAV[ID], TVCL, TVVC, TVKA, TVBIOAV) %>%
+  gather_draws(c(CL, VC, KA, BIOAV)[ID], TVCL, TVVC, TVKA, TVBIOAV) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
 
@@ -360,15 +360,11 @@ ggplot() +
 
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", "KA", "BIOAV"),
-                           std_dev, ind_params, ...){
+plot_shrinkage <- function(.variable, std_dev, ind_params, ...){
   
   dots <- list(...)
   
-  .variable <- match.arg(.variable)
-  
   x_label <- glue::glue("$\\eta_{[.variable]}$", .open = "[", .close = "]")
-  # x_label <- str_c("eta_", .variable)
   
   p_1 <- ggplot() +
     geom_histogram(aes(x = ind_params$ind_params,
@@ -412,7 +408,7 @@ plot_shrinkage_multiple <- function(draw){
     ungroup() %>% 
     mutate(.variable = str_remove(.variable, "eta_")) %>% 
     left_join(draws_df %>%
-                gather_draws(omega_cl, omega_vc, omega_ka, omega_bioav) %>% 
+                gather_draws(`omega_.*`, regex = TRUE) %>% 
                 ungroup() %>% 
                 arrange(.draw) %>% 
                 rename(omega = ".value") %>% 
@@ -427,14 +423,13 @@ draws_for_shrinkage <- draws_df %>%
   sample_draws(4)
 
 data_shrinkage_by_draw <- draws_for_shrinkage %>%
-  gather_draws(omega_cl, omega_vc, omega_ka, omega_bioav) %>%
+  gather_draws(`omega_.*`, regex = TRUE) %>%
   mutate(.variable = str_remove(.variable, "omega_") %>%
            toupper()) %>%
   rename(std_dev = .value) %>%
   ungroup() %>% 
   inner_join(draws_for_shrinkage %>%
-               gather_draws(eta_cl[ID], eta_vc[ID], eta_ka[ID], 
-                            eta_bioav[ID]) %>%
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>%
                ungroup()  %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -466,7 +461,7 @@ draws_df %>%
   ungroup() %>% 
   mutate(.variable = str_remove(.variable, "eta_")) %>% 
   left_join(draws_df %>%
-              gather_draws(omega_cl, omega_vc, omega_ka, omega_bioav) %>% 
+              gather_draws(`omega_.*`, regex = TRUE) %>%
               summarize(estimate = mean(.value)) %>% 
               ungroup() %>% 
               mutate(.variable = str_remove(.variable, "omega_")),
@@ -474,13 +469,12 @@ draws_df %>%
   mutate(shrinkage = 1 - std_dev/estimate)
 
 data_shrinkage_with_point_estimates <- draws_df %>% 
-  gather_draws(omega_cl, omega_vc, omega_ka, omega_bioav) %>% 
+  gather_draws(`omega_.*`, regex = TRUE) %>%
   summarize(std_dev = mean(.value)) %>% 
   mutate(.variable = str_remove(.variable, "omega_") %>% 
            toupper()) %>% 
   inner_join(draws_df %>%
-               gather_draws(eta_cl[ID], eta_vc[ID], eta_ka[ID], 
-                            eta_bioav[ID]) %>%
+               gather_draws(`eta_.*`[ID], regex = TRUE) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
@@ -495,15 +489,15 @@ pmap(data_shrinkage_with_point_estimates,
 
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(CL[ID], VC[ID], KA[ID], BIOAV[ID],
-               eta_cl[ID], eta_vc[ID], eta_ka[ID], eta_bioav[ID]) %>% 
+  spread_draws(c(CL, VC, KA, BIOAV, 
+                 eta_cl, eta_vc, eta_ka, eta_bioav)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, KA, BIOAV,
          eta_cl, eta_vc, eta_ka, eta_bioav) %>% 
   inner_join(nonmem_data %>% 
                distinct(ID, type, cohort),
              by = "ID") %>% 
-  mutate(ID = factor(ID)) 
+  mutate(ID = factor(ID))
 
 ## Standardized Random Effects (posterior mean)
 eta_std <- est_ind %>% 

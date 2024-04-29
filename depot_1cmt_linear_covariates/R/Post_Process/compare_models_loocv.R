@@ -10,16 +10,17 @@ library(patchwork)
 library(posterior)
 library(tidyverse)
 
-fit_no_covariates <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_no_covariates.rds")
-fit_wt_fixed_allometric <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_wt_fixed_allometric.rds")
-fit_wt <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_wt.rds")
-fit_covariates <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_covariates.rds")
+filename_base <- "depot_1cmt_linear_covariates/Stan/Fits"
 
+fit_no_covariates <- read_rds(file.path(filename_base, 
+                                        "depot_1cmt_prop_no_covariates.rds"))
+fit_fixed_allometric <- read_rds(file.path(filename_base, 
+                                           "depot_1cmt_prop_covariates_fixed_allometric.rds"))
+fit_covariates <- read_rds(file.path(filename_base, 
+                                     "depot_1cmt_prop_covariates.rds"))
 
-fit_no_covariates_loo <- fit_no_covariates$loo()
-fit_wt_fixed_allometric_loo <- fit_wt_fixed_allometric$loo()
-fit_wt_loo <- fit_wt$loo()
-fit_covariates_loo <- fit_covariates$loo()
+fit_no_covariates_loo <- fit_no_covariates$loo(cores = min(4, parallel::detectCores()/2))
+fit_fixed_allometric_loo <- fit_fixed_allometric$loo(cores = min(4, parallel::detectCores()/2))
+fit_covariates_loo <- fit_covariates$loo(cores = min(4, parallel::detectCores()/2))
 
-loo_compare(fit_no_covariates_loo, fit_wt_fixed_allometric_loo,
-            fit_wt_loo, fit_covariates_loo)
+loo_compare(fit_no_covariates_loo, fit_fixed_allometric_loo, fit_covariates_loo)

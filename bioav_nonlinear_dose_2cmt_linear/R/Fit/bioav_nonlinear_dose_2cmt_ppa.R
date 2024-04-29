@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
+# library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
@@ -26,26 +26,26 @@ nonmem_data %>%
             n_bloq = sum(bloq)) %>%
   filter(n_bloq > 0)
 
-(p1 <- ggplot(nonmem_data %>%
-                filter(mdv == 0)) +
-    geom_line(mapping = aes(x = time, y = DV, group = ID, color = dose)) +
-    geom_point(mapping = aes(x = time, y = DV, group = ID, color = dose)) +
-    scale_color_discrete(name = "Dose") +
-    scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
-                       limits = c(NA, NA),
-                       trans = "log10") +
-    scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168/24, by = 24/24),
-                       limits = c(0, NA)) +
-    theme_bw(18) +
-    theme(axis.text = element_text(size = 14, face = "bold"),
-          axis.title = element_text(size = 18, face = "bold"),
-          axis.line = element_line(linewidth = 2),
-          legend.position = "bottom"))
-
-p1 +
-  facet_wrap(~dose, scales = "free_y", labeller = label_both, ncol = 3)
+# (p1 <- ggplot(nonmem_data %>%
+#                 filter(mdv == 0)) +
+#     geom_line(mapping = aes(x = time, y = DV, group = ID, color = dose)) +
+#     geom_point(mapping = aes(x = time, y = DV, group = ID, color = dose)) +
+#     scale_color_discrete(name = "Dose") +
+#     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+#                        limits = c(NA, NA),
+#                        trans = "log10") +
+#     scale_x_continuous(name = "Time (d)",
+#                        breaks = seq(0, 168, by = 24),
+#                        labels = seq(0, 168/24, by = 24/24),
+#                        limits = c(0, NA)) +
+#     theme_bw(18) +
+#     theme(axis.text = element_text(size = 14, face = "bold"),
+#           axis.title = element_text(size = 18, face = "bold"),
+#           axis.line = element_line(linewidth = 2),
+#           legend.position = "bottom"))
+# 
+# p1 +
+#   facet_wrap(~dose, scales = "free_y", labeller = label_both, ncol = 3)
 
 # p1 +
 #   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
@@ -127,7 +127,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_p = 0.5,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "bioav_nonlinear_dose_2cmt_linear/Stan/Fit/bioav_nonlinear_dose_2cmt_ppa.stan",
@@ -144,6 +145,8 @@ fit <-
                adapt_delta = 0.8,
                refresh = 500,
                max_treedepth = 10,
+               output_dir = "bioav_nonlinear_dose_2cmt_linear/Stan/Fits/Output",
+               output_basename = "ppa",
                init = function() list(TVCL = rlnorm(1, log(1), 0.3),
                                       TVVC = rlnorm(1, log(18), 0.3),
                                       TVQ = rlnorm(1, log(4), 0.3),
@@ -158,3 +161,5 @@ fit <-
 fit$save_object(
   "bioav_nonlinear_dose_2cmt_linear/Stan/Fits/bioav_nonlinear_dose_2cmt_ppa.rds")
 
+fit$save_data_file(dir = "bioav_nonlinear_dose_2cmt_linear/Stan/Fits/Stan_Data",
+                   basename = "ppa", timestamp = FALSE, random = FALSE)

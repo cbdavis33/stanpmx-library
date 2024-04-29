@@ -11,14 +11,14 @@ library(posterior)
 library(tidyverse)
 
 n_depots <- 3
-n_depots_with_delay <- n_depots # "n_depots - 1" means no delay on the 
+n_depots_with_delay <- n_depots - 1 # "n_depots - 1" means no delay on the 
                                 # fastest depot. "n_depots" means a delay on
                                 # fastest depot
 
 with_or_without_delay_string <- if_else(n_depots_with_delay == n_depots, 
                                         "with_initial_delay", 
                                         "no_initial_delay")
-prior_string <- "prior_kan_durn"
+prior_string <- "prior_ka1_durn"
 
 nonmem_data <- read_csv(file.path("parallel_first_order_1cmt_linear",
                                   "zero_into_depot_for_delays",
@@ -102,7 +102,7 @@ mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka", "omega_dur")))
 mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
-fit_loo <- fit$loo()
+fit_loo <- fit$loo(cores = min(4, parallel::detectCores()/2))
 fit_loo
 plot(fit_loo, label_points = TRUE)
 
@@ -110,7 +110,7 @@ draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
-  spread_draws(pred[i], ipred[i], dv_ppc[i]) %>%
+  spread_draws(c(pred, ipred, dv_ppc)[i]) %>%
   mean_qi(pred, ipred, dv_ppc) %>%
   mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
@@ -236,7 +236,7 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Look at residuals and epsilon shrinkage
 residuals <- draws_df %>%
-  spread_draws(res[i], wres[i], ires[i], iwres[i], ipred[i]) %>% 
+  spread_draws(c(res, wres, ires, iwres, ipred)[i]) %>% 
   mutate(time = nonmem_data$time[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i])
 
@@ -386,7 +386,7 @@ iwres_mean %>%
 # We can look at individual posterior densities on top of the density of the 
 # population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID, Depot], DUR[ID, Depot], 
+  gather_draws(c(CL, VC)[ID], KA[ID, Depot], DUR[ID, Depot], 
                TVCL, TVVC, TVKA[Depot], TVDUR[Depot]) %>%
   ungroup() %>%
   mutate(across(c(ID, .variable), as.factor))
@@ -426,16 +426,11 @@ ggplot() +
 
 ## Shrinkage
 # A function to visualize the shrinkage
-plot_shrinkage <- function(.variable = c("CL", "VC", str_c("KA_", 1:n_depots), 
-                                         str_c("DUR_", 1:n_depots)),
-                           std_dev, ind_params, ...){
+plot_shrinkage <- function(.variable, std_dev, ind_params, ...){
   
   dots <- list(...)
   
-  .variable <- match.arg(.variable)
-  
   x_label <- glue::glue("$\\eta_{[.variable]}$", .open = "[", .close = "]")
-  # x_label <- str_c("eta_", .variable)
   
   p_1 <- ggplot() +
     geom_histogram(aes(x = ind_params$ind_params,
@@ -529,7 +524,7 @@ data_shrinkage_by_draw <- draws_for_shrinkage %>%
   mutate(.variable = str_remove(.variable, "omega_") %>%
            toupper()) %>% 
   inner_join(draws_for_shrinkage %>%
-               gather_draws(eta_cl[ID], eta_vc[ID]) %>%
+               gather_draws(c(eta_cl, eta_vc)[ID]) %>%
                ungroup()  %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -570,7 +565,7 @@ map(data_shrinkage_by_draw %>%
 ## rather than the full posterior, but here it is, anyways
 ## (1 - sd(individual means)/(posterior mean of omega))
 draws_df %>%
-  gather_draws(eta_cl[ID], eta_vc[ID]) %>% 
+  gather_draws(c(eta_cl, eta_vc)[ID]) %>% 
   bind_rows(draws_df %>%
               gather_draws(eta_ka[ID, Depot], eta_dur[ID, Depot]) %>% 
               ungroup() %>% 
@@ -623,7 +618,7 @@ data_shrinkage_with_point_estimates <- draws_df %>%
               ungroup() %>% 
               select(-Depot)) %>% 
   inner_join(draws_df %>%
-               gather_draws(eta_cl[ID], eta_vc[ID]) %>%
+               gather_draws(c(eta_cl, eta_vc)[ID]) %>%
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
@@ -652,12 +647,11 @@ pmap(data_shrinkage_with_point_estimates,
 
 # Individual point estimates (posterior mean)
 est_ind <- draws_df %>%
-  spread_draws(CL[ID], VC[ID],
-               eta_cl[ID], eta_vc[ID]) %>% 
+  spread_draws(c(CL, VC, eta_cl, eta_vc)[ID]) %>% 
   mean_qi() %>% 
   inner_join(draws_df %>%
-               gather_draws(KA[ID, Depot], DUR[ID, Depot], 
-                            eta_ka[ID, Depot], eta_dur[ID, Depot]) %>% 
+               gather_draws(c(KA, eta_ka)[ID, Depot], 
+                            c(DUR, eta_dur)[ID, Depot]) %>% 
                mutate(.variable = str_c(.variable, "_", Depot)) %>% 
                ungroup() %>% 
                select(-Depot) %>% 
@@ -689,7 +683,7 @@ eta_std <- est_ind %>%
     ggtitle("Point Estimates")) +
   (draws_df %>%
      sample_draws(10) %>%
-     spread_draws(eta_cl[ID], eta_vc[ID]) %>% 
+     spread_draws(c(eta_cl, eta_vc)[ID]) %>% 
      ungroup()  %>% 
      mutate(ID = factor(ID)) %>% 
      ggplot(aes(x = eta_cl, y = eta_vc)) + 
@@ -699,83 +693,3 @@ eta_std <- est_ind %>%
      ggtitle("Samples"))
 
 
-## Let's examine covariate effects (dose). 
-# Based on posterior samples for the individuals (a la Monolix). This is a more 
-# Bayesian way of doing this, and we should be able to get around the issues 
-# that shrinkage causes in the frequentist setting. 
-
-
-## TODO: Finish from here down
-
-
-# draws_for_covariate_examination <- draws_df %>%
-#   sample_draws(10) %>%
-#   gather_draws(eta_cl[ID], eta_vc[ID]) %>% 
-#   ungroup()  %>% 
-#   left_join(nonmem_data %>% 
-#               filter(evid == 1) %>% 
-#               group_by(ID) %>% 
-#               mutate(dose = unique(amt)) %>% 
-#               ungroup() %>% 
-#               distinct(ID, dose), 
-#             by = "ID") %>% 
-#   mutate(dose = factor(dose),
-#          .variable = factor(.variable, 
-#                             levels = str_c("eta_", c("cl", "vc", "q", "vp", 
-#                                                      "ka", "dur"))),
-#          .variable = fct_recode(.variable, "eta[CL]" = "eta_cl",
-#                                 "eta[VC]" = "eta_vc",
-#                                 "eta[Q]" = "eta_q",
-#                                 "eta[VP]" = "eta_vp",
-#                                 "eta[KA]" = "eta_ka",
-#                                 "eta[DUR]" = "eta_dur"))
-# 
-# (p_draws_dose <- draws_for_covariate_examination %>% 
-#     ggplot(aes(x = dose, y = .value)) +
-#     geom_boxplot() +
-#     scale_x_discrete(name = "Dose") +
-#     scale_y_continuous(name = "Indiv. Effect") +
-#     theme_bw(18) +
-#     geom_hline(yintercept = 0, linetype = "dashed") +
-#     facet_wrap(~.variable, scales = "free", labeller = label_parsed))
-# 
-# # Based on individual point estimates. This is not the best way to do it
-# # Individual point estimates (posterior mean)
-# est_ind <- draws_df %>%
-#   spread_draws(CL[ID], VC[ID], KA[ID],
-#                eta_cl[ID], eta_vc[ID], eta_ka[ID]) %>% 
-#   mean_qi() %>% 
-#   select(ID, CL, VC, KA,
-#          eta_cl, eta_vc, eta_ka) %>% 
-#   mutate(ID = factor(ID))
-# 
-# ## Standardized Random Effects (posterior mean)
-# eta_std <- est_ind %>% 
-#   select(ID, starts_with("eta")) %>% 
-#   pivot_longer(cols = starts_with("eta"), 
-#                names_to = "parameter", 
-#                values_to = "eta",
-#                names_prefix = "eta_") %>% 
-#   group_by(parameter) %>% 
-#   mutate(eta_std = (eta - mean(eta))/sd(eta)) %>% 
-#   ungroup() %>% 
-#   mutate(parameter = toupper(parameter)) %>% 
-#   left_join(nonmem_data %>% 
-#               distinct(ID, dose) %>% 
-#               mutate(ID = factor(ID),
-#                      dose = factor(dose)), 
-#             by = "ID") %>% 
-#   mutate(parameter = factor(parameter, levels = c("CL", "VC", "KA")))
-# 
-# (p_point_dose <- eta_std %>% 
-#     ggplot(aes(x = dose, y = eta)) + 
-#     geom_boxplot() +
-#     scale_x_discrete(name = "Dose") +
-#     scale_y_continuous(name = "Indiv. Effect") +
-#     theme_bw(18) +
-#     geom_hline(yintercept = 0, linetype = "dashed") +
-#     facet_wrap(~parameter, scales = "free"))
-# 
-# p_point_dose / 
-#   p_draws_dose
-# 

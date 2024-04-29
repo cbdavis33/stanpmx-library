@@ -96,6 +96,12 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
+# preds <- model$generate_quantities(fit$draws() %>%
+#                                      thin_draws(100),
+#                                    data = stan_data,
+#                                    parallel_chains = 4,
+#                                    seed = 1234)
+
 preds_df <- preds$draws(format = "draws_df")
 
 rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data")))
@@ -126,7 +132,7 @@ ggplot(post_preds_summary, aes(x = time, group = ID)) +
   scale_x_continuous(name = "Time (h)",
                      breaks = seq(0, 216, by = 24),
                      labels = seq(0, 216, by = 24),
-                     limits = c(0, 168)) +
+                     limits = c(0, NA)) +
   theme_bw() +
   theme(axis.text = element_text(size = 14, face = "bold"),
         axis.title = element_text(size = 18, face = "bold"),
@@ -150,8 +156,9 @@ for(i in 1:ggforce::n_pages(tmp)){
           geom_line(aes(y = pred), linetype = 2, size = 1.05) +
           geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
                      color = "red") +
-          scale_y_log10(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                        limits = c(NA, NA)) +
+          scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+                             trans = "identity",
+                             limits = c(NA, NA)) +
           scale_x_continuous(name = "Time (h)",
                              breaks = seq(0, 168, by = 24),
                              labels = seq(0, 168, by = 24),
@@ -168,10 +175,10 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Individual estimates (posterior mean)
 est_ind <- preds_df %>%
-  spread_draws(CL[ID], VC[ID], KA[ID], 
-               auc_ss[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+  spread_draws(c(CL, VC, KA, DUR,
+                 auc_ss, c_max, t_max, t_half)[ID]) %>% 
   mean_qi() %>% 
-  select(ID, CL, VC, KA, 
+  select(ID, CL, VC, KA, DUR,
          auc_ss, c_max, t_max, t_half) %>% 
   inner_join(post_preds_summary %>% 
                filter(time == 168) %>% 
