@@ -3,9 +3,9 @@
 This is a collection of pharmacometric models written in Stan + Torsten and R.
 In this repo are templates for many common and less-common models in
 Stan + Torsten - basic one- and two-compartment IV and/or oral models,
-Michaelis-Menten elimination, indirect response models (eventually), the
-Friberg-Karlsson model (eventually), the Savic transit compartment absorption
-model, models with covariates, BLOQ-handling, exposure-response analyses, etc. ….
+Michaelis-Menten elimination (eventually), indirect response models (eventually), the
+Friberg-Karlsson model, the Savic transit compartment absorption
+model, models with covariates, BLOQ-handling, exposure-response analyses (eventually), etc. ….
 [bayespmx.github.io](https://bayespmx.github.io) (incomplete and in the early stages,
 but updated periodically) and [stanpmx.github.io](https://stanpmx.github.io) 
 (no longer maintained) provide some tutorials and guidance. I
@@ -40,7 +40,7 @@ save the fitted object.
 Basically, each directory is meant to be able to
 
 1) \*/\*/Simulate/ - Simulate fake data. Roughly a substitute for mrgsolve or
-RxODE. It's not necessarily as flexible and comprehensive, but \it's a good part
+RxODE. It's not necessarily as flexible and comprehensive as those, but it's a good part
 of the workflow, partly so you can create some fake data to fit, and partly so
 you can quickly simulate data to check you've written your ODEs correctly. I
 think it's an important step in the process. Since proportional error is a
@@ -58,9 +58,12 @@ implement
 with
 [some code](https://bayespmx.github.io/tutorials/Threading-for-Within-Chain-Parallelization.html#example-one-compartment-iv)
 I wrote. The ones that don't do this have \*_no_threading in the filename. The
-no-threading files are really only for speed testing. I wouldn't bother actually
-fitting with those. The threaded models have been, without fail, faster than the
-non-threaded models. In theory, there are cases where threading isn't faster and
+no-threading files are mostly for speed testing. I wouldn't bother actually
+fitting with those unless you're on a very basic machine with 8 cores or fewer
+and the model is extremely simple. The threaded models are faster than the
+non-threaded models if you have a computing infrastructure (high-end laptop, desktop.
+or HPC) that will allow for
+more than 2 threads per chain. In theory, there are cases where threading isn't faster and
 is actually slower, but not for any PopPK/PopPKPD models. Many of the models
 also have a \*_prop_all_solvers.\* file. This one is meant to fit the
 proportional error model while giving the user the option to use the analytical,
@@ -76,15 +79,18 @@ omega_vc, omega_q, omega_vp rather than omega[1], omega[2], omega[3], omega[4]
 and cor_cl_vc rather than R[1, 2]... Hopefully this all makes sense, and you can
 figure out what everything is by its name in the code.
 
-3) \*/Stan/Fits/ - Save the fitted objects here (from \*/R/Fit/\*.R)
+4) \*/Stan/Fits/ - Save the fitted objects here (from \*/R/Fit/\*.R). There is
+also an Output/ subdirectory here where I write the CSVs so that I can check on
+the progress for long-running models. There is also a Stan_Data/ subdirectory
+here where I write the stan_data list that goes into the fit.
 
-4) \*/R/Post_Process/ - Look at posterior summaries, MCMC diagnostics, LOO-CV,
+6) \*/R/Post_Process/ - Look at posterior summaries, MCMC diagnostics, LOO-CV,
 DV vs. PRED/IPRED, residuals, shrinkage, ... I don't think this file is
 completely comprehensive, but it's a good starting point.
 \*_compare_prior_and_posterior.\*  also reads in the fitted object, simulates
 from the prior, then compares the prior and the posterior.
 
-5) \*/\*/Predict/ - \*_predict_observed_subjects.\* simulates from the posterior
+7) \*/\*/Predict/ - \*_predict_observed_subjects.\* simulates from the posterior
 for the observed subjects. Basically meaning it takes the actual observed
 subjects, their actual dosing regimen, and simulates from their individual
 posterior at the timepoints you want to see. This helps make prettier PPC
@@ -97,9 +103,9 @@ applicable) and then simulate new subjects. The difference here from
 \*_predict_observed_subjects.\* is the simulation of new etas for the new
 subjects. Pretty standard.
 
-6) \*/R/VPC/ - Do a VPC and PCVPC using the vpc package. I haven't spent a ton
+8) \*/R/VPC/ - Do a VPC and PCVPC using the vpc package. I haven't spent a ton
 of time on this, so it's probably more of a starting point that you'd need to do
 a bunch more work on.
 
-7) \*/R/NPDE_unfinished/ - NPDEs using the npde package. I've spent very little
+9) \*/R/NPDE_unfinished/ - NPDEs using the npde package. I've spent very little
 time on this, so I'm not even sure it can count as a starting point. 
