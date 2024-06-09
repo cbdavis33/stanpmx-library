@@ -1,11 +1,12 @@
 // First Order Absorption (oral/subcutaneous)
-// One-compartment PK Model
+// Two-compartment PK Model
 // IIV on CL, VC, and KA (full covariance matrix)
 // IIV on KIN, KOUT, IC50 (full covariance matrix) for PD. IMAX and HILL are 
 //   fixed to be 1
-// proportional error on PK - DV = IPRED*(1 + eps_p)
-// proportional error on PD - DV = IPRED*(1 + eps_p_pd)
-// Users choice of general or coupled ODE solution using Torsten
+// proportional plus additive error on PK - DV = IPRED*(1 + eps_p) + eps_a
+// proportional plus additive error on PD - DV = IPRED*(1 + eps_p_pd) + eps_a_pd
+// General ODE solution using Torsten (not sure why, but it's faster than 
+//   coupled). rk45, since it's faster than bdf
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
 // Since we have a normal distribution on the error, but the DV must be > 0, it
@@ -132,13 +133,13 @@ functions{
                         vector CL, vector VC, vector KA, 
                         vector KIN, vector KOUT, vector IC50, 
                         vector IMAX, vector HILL,
-                        real sigma_p, real sigma_p_pd,
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a,
+                        real sigma_sq_p_pd, real sigma_sq_a_pd, real sigma_p_a_pd,
                         vector lloq, array[] int bloq,
                         int n_random, int n_random_pd, 
                         int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, 
-                        int n_cmt, int n_cmt_pd,  
-                        int solver){
+                        int n_cmt, int n_cmt_pd){
                            
     real ptarget = 0;
                               
@@ -165,74 +166,20 @@ functions{
       int j = n + start - 1; // j is the ID of the current subject
       real r_0 = KIN[j]/KOUT[j];
       
-      if(solver == 1){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ir1_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], KA[j], 
-                          KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
-          
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_rk45(depot_1cmt_ir1_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {CL[j], VC[j], KA[j], 
-                                 KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0}, 
-                                bioav, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ir1_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], KA[j], 
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_1cmt_ir1_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {CL[j], VC[j], KA[j], 
                         KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
-                         
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_bdf(depot_1cmt_ir1_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {CL[j], VC[j], KA[j], 
-                                KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0}, 
-                               bioav, tlag)';
-        
-      }
-                      
+   
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           dv_ipred[k] = x_ipred[k, 2] / VC[j];
@@ -249,7 +196,9 @@ functions{
     
       if(cmt_slice[i] == 2 || cmt_slice[i] == 3){
         real ipred_tmp = ipred_slice[i];
-        real sigma_tmp = cmt_slice[i] == 2 ? ipred_tmp*sigma_p : ipred_tmp*sigma_p_pd;
+        real sigma_tmp = cmt_slice[i] == 2 ? 
+          sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 2*ipred_tmp*sigma_p_a) : 
+          sqrt(square(ipred_tmp) * sigma_sq_p_pd + sigma_sq_a_pd + 2*ipred_tmp*sigma_p_a_pd);
     
         if(bloq_slice[i] == 1){
           ptarget += log_diff_exp(normal_lcdf(lloq_slice[i] | ipred_tmp, sigma_tmp),
@@ -260,10 +209,10 @@ functions{
                      normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
         }
       }  
-    }
-  
-    return ptarget;         
-  
+    }                                         
+                              
+    return ptarget;
+                           
   }
   
 }
@@ -303,6 +252,9 @@ data{
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
   
   real<lower = 0> location_tvkin;  // Prior Location parameter for KIN
   real<lower = 0> location_tvkout; // Prior Location parameter for KOUT
@@ -318,11 +270,16 @@ data{
   
   real<lower = 0> lkj_df_omega_pd;  // Prior degrees of freedom for omega_pd cor mat
   
-  real<lower = 0> scale_sigma_p_pd;  // Prior Scale parameter for proportional error for PD
+  real<lower = 0> scale_sigma_p_pd;  // Prior Scale parameter for proportional error
+  real<lower = 0> scale_sigma_a_pd;  // Prior Scale parameter for additive error
+  
+  real<lower = 0> lkj_df_sigma_pd;   // Prior degrees of freedom for sigma_pd cor mat
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
-  
-  int<lower = 1, upper = 4> solver; // 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf
+  int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
+                                                        // generated quantities. Useful
+                                                        // for simulating prior parameters
+                                                        // but don't want prior predictions
  
 }
 transformed data{ 
@@ -338,14 +295,18 @@ transformed data{
   int n_random = 3;
   int n_random_pd = 3;
   
-  int n_cmt = 2;     // number of ODEs in PK model (depot, central, peripheral)
+  int n_cmt = 2;     // number of ODEs in PK model (depot, central)
   int n_cmt_pd = 1;  // number of ODEs in PD system
   
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_ka};
                                       
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
+                                      
   array[n_random_pd] real scale_omega_pd = {scale_omega_kin, scale_omega_kout, 
                                             scale_omega_ic50};
+  
+  array[2] real scale_sigma_pd = {scale_sigma_p_pd, scale_sigma_a_pd}; 
   
   array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
   
@@ -369,7 +330,8 @@ parameters{
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma_p;
+  vector<lower = 0>[2] sigma;
+  cholesky_factor_corr[2] L_Sigma;
   
   matrix[n_random, n_subjects] Z;
   
@@ -380,7 +342,8 @@ parameters{
   vector<lower = 0>[n_random_pd] omega_pd;
   cholesky_factor_corr[n_random_pd] L_pd;
   
-  real<lower = 0> sigma_p_pd;
+  vector<lower = 0>[2] sigma_pd;
+  cholesky_factor_corr[2] L_Sigma_pd;
   
   matrix[n_random_pd, n_subjects] Z_pd;
   
@@ -394,12 +357,30 @@ transformed parameters{
   vector[n_subjects] VC;
   vector[n_subjects] KA;
   
+  real<lower = 0> sigma_p = sigma[1];
+  real<lower = 0> sigma_a = sigma[2];
+  
+  real<lower = 0> sigma_sq_p = square(sigma_p);
+  real<lower = 0> sigma_sq_a = square(sigma_a);
+  
+  real cor_p_a;
+  real sigma_p_a;
+  
   vector[n_subjects] eta_kin;
   vector[n_subjects] eta_kout;
   vector[n_subjects] eta_ic50;
   vector[n_subjects] KIN;
   vector[n_subjects] KOUT;
   vector[n_subjects] IC50;
+  
+  real<lower = 0> sigma_p_pd = sigma_pd[1];
+  real<lower = 0> sigma_a_pd = sigma_pd[2];
+  
+  real<lower = 0> sigma_sq_p_pd = square(sigma_p_pd);
+  real<lower = 0> sigma_sq_a_pd = square(sigma_a_pd);
+  
+  real cor_p_a_pd;
+  real sigma_p_a_pd;
 
   {
     
@@ -408,6 +389,9 @@ transformed parameters{
     matrix[n_subjects, n_random] eta = diag_pre_multiply(omega, L * Z)';  
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
+    matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
     
     row_vector[n_random_pd] typical_values_pd = to_row_vector({TVKIN, TVKOUT, 
                                                                TVIC50});
@@ -416,6 +400,9 @@ transformed parameters{
                                       diag_pre_multiply(omega_pd, L_pd * Z_pd)';  
     matrix[n_subjects, n_random_pd] theta_pd =
                      (rep_matrix(typical_values_pd, n_subjects) .* exp(eta_pd));
+                     
+    matrix[2, 2] R_Sigma_pd = multiply_lower_tri_self_transpose(L_Sigma_pd);
+    matrix[2, 2] Sigma_pd = quad_form_diag(R_Sigma_pd, sigma_pd);
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
@@ -431,6 +418,12 @@ transformed parameters{
     KOUT = col(theta_pd, 2);
     IC50 = col(theta_pd, 3);
     
+    cor_p_a = R_Sigma[1, 2];
+    sigma_p_a = Sigma[1, 2];
+    
+    cor_p_a_pd = R_Sigma_pd[1, 2];
+    sigma_p_a_pd = Sigma_pd[1, 2];
+    
   }
   
 }
@@ -444,7 +437,8 @@ model{
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
-  sigma_p ~ normal(0, scale_sigma_p);
+  sigma ~ normal(0, scale_sigma);
+  L_Sigma ~ lkj_corr_cholesky(lkj_df_sigma);
   
   to_vector(Z) ~ std_normal();
   
@@ -455,7 +449,8 @@ model{
   omega_pd ~ normal(0, scale_omega_pd);
   L_pd ~ lkj_corr_cholesky(lkj_df_omega_pd);
   
-  sigma_p_pd ~ normal(0, scale_sigma_p_pd);
+  sigma_pd ~ normal(0, scale_sigma_pd);
+  L_Sigma_pd ~ lkj_corr_cholesky(lkj_df_sigma_pd);
   
   to_vector(Z_pd) ~ std_normal();
   
@@ -467,17 +462,15 @@ model{
                          rate, ii, addl, ss, subj_start, subj_end, 
                          CL, VC, KA,
                          KIN, KOUT, IC50, IMAX, HILL,
-                         sigma_p, sigma_p_pd,
+                         sigma_sq_p, sigma_sq_a, sigma_p_a, 
+                         sigma_sq_p_pd, sigma_sq_a_pd, sigma_p_a_pd, 
                          lloq, bloq,
                          n_random, n_random_pd, n_subjects, n_total,
-                         bioav, tlag, n_cmt, n_cmt_pd, solver);
+                         bioav, tlag, n_cmt, n_cmt_pd);
                          
   }
 }
 generated quantities{
-  
-  real<lower = 0> sigma_sq_p = square(sigma_p);
-  real<lower = 0> sigma_sq_p_pd = square(sigma_p_pd);
 
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
@@ -528,13 +521,6 @@ generated quantities{
                                        multiply_lower_tri_self_transpose(L_pd);
     matrix[n_random_pd, n_random_pd] Omega_pd = quad_form_diag(R_pd, omega_pd);
 
-    vector[n_total] dv_pred;
-    matrix[n_total, n_cmt + n_cmt_pd] x_pred;
-    vector[n_total] dv_ipred;
-    matrix[n_total, n_cmt + n_cmt_pd] x_ipred;
-    
-    real TVR0 = TVKIN/TVKOUT;
-
     cor_cl_vc = R[1, 2];
     cor_cl_ka = R[1, 3];
     cor_vc_ka = R[2, 3];
@@ -550,142 +536,50 @@ generated quantities{
     omega_kin_kout = Omega_pd[1, 2];
     omega_kin_ic50 = Omega_pd[1, 3];
     omega_kout_ic50 = Omega_pd[2, 3];
+    
+  }
+  
+  if(no_gq_predictions == 0){
+    
+    vector[n_total] dv_pred;
+    matrix[n_total, n_cmt + n_cmt_pd] x_pred;
+    vector[n_total] dv_ipred;
+    matrix[n_total, n_cmt + n_cmt_pd] x_ipred;
+    
+    real TVR0 = TVKIN/TVKOUT;
 
     for(j in 1:n_subjects){
       
       real r_0 = KIN[j]/KOUT[j];
-      
-      if(solver == 1){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ir1_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {CL[j], VC[j], KA[j], 
-                          KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
-                          
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_ir1_ode,
-                         n_cmt + n_cmt_pd,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVKA, 
-                          TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                          TVR0})';
-          
-      }else if(solver == 2){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_rk45(depot_1cmt_ir1_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {CL[j], VC[j], KA[j], 
-                                 KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], 
-                                 r_0}, 
-                                bioav, tlag)';
-                                
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_rk45(depot_1cmt_ir1_ode_coupled,
-                                n_cmt_pd,
-                                time[subj_start[j]:subj_end[j]],
-                                amt[subj_start[j]:subj_end[j]],
-                                rate[subj_start[j]:subj_end[j]],
-                                ii[subj_start[j]:subj_end[j]],
-                                evid[subj_start[j]:subj_end[j]],
-                                cmt[subj_start[j]:subj_end[j]],
-                                addl[subj_start[j]:subj_end[j]],
-                                ss[subj_start[j]:subj_end[j]],
-                                {TVCL, TVVC, TVKA, 
-                                 TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                                 TVR0}, 
-                                bioav, tlag)';
-                           
-      }else if(solver == 3){
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ir1_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {CL[j], VC[j], KA[j], 
+
+      x_ipred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_1cmt_ir1_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {CL[j], VC[j], KA[j], 
                         KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], r_0})';
                         
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_ir1_ode,
-                        n_cmt + n_cmt_pd,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {TVCL, TVVC, TVKA, 
-                         TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                         TVR0})';
-                         
-      }else{
-        
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_bdf(depot_1cmt_ir1_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {CL[j], VC[j], KA[j], 
-                                KIN[j], KOUT[j], IC50[j], IMAX[j], HILL[j], 
-                                r_0}, 
-                               bioav, tlag)';
-                               
-        x_pred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_bdf(depot_1cmt_ir1_ode_coupled,
-                               n_cmt_pd,
-                               time[subj_start[j]:subj_end[j]],
-                               amt[subj_start[j]:subj_end[j]],
-                               rate[subj_start[j]:subj_end[j]],
-                               ii[subj_start[j]:subj_end[j]],
-                               evid[subj_start[j]:subj_end[j]],
-                               cmt[subj_start[j]:subj_end[j]],
-                               addl[subj_start[j]:subj_end[j]],
-                               ss[subj_start[j]:subj_end[j]],
-                               {TVCL, TVVC, TVKA, 
-                                TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
-                                TVR0}, 
-                               bioav, tlag)';
-        
-      }
+      x_pred[subj_start[j]:subj_end[j],] =
+        pmx_solve_rk45(depot_1cmt_ir1_ode,
+                       n_cmt + n_cmt_pd,
+                       time[subj_start[j]:subj_end[j]],
+                       amt[subj_start[j]:subj_end[j]],
+                       rate[subj_start[j]:subj_end[j]],
+                       ii[subj_start[j]:subj_end[j]],
+                       evid[subj_start[j]:subj_end[j]],
+                       cmt[subj_start[j]:subj_end[j]],
+                       addl[subj_start[j]:subj_end[j]],
+                       ss[subj_start[j]:subj_end[j]],
+                       {TVCL, TVVC, TVKA, 
+                        TVKIN, TVKOUT, TVIC50, TVIMAX, TVHILL, 
+                        TVR0})';
       
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
@@ -697,21 +591,24 @@ generated quantities{
         }
       }
     }
-    
+
     pred = dv_pred[i_obs];
     ipred = dv_ipred[i_obs];
-      
+
     res = dv_obs - pred;
     ires = dv_obs - ipred;
-      
+
     for(i in 1:n_obs){
-    
+      
       if(cmt[i_obs[i]] == 2 || cmt[i_obs[i]] == 3){
         real ipred_tmp = ipred[i];
-        real sigma_tmp = cmt[i_obs[i]] == 2 ? ipred_tmp*sigma_p : ipred_tmp*sigma_p_pd;
-    
+        real sigma_tmp = cmt[i_obs[i]] == 2 ? 
+          sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 2*ipred_tmp*sigma_p_a) : 
+          sqrt(square(ipred_tmp) * sigma_sq_p_pd + sigma_sq_a_pd + 
+                            2*ipred_tmp*sigma_p_a_pd);
+      
         dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-    
+      
         if(bloq_obs[i] == 1){
           log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
                                     normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
@@ -720,11 +617,10 @@ generated quantities{
           log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
                        normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
         }
-    
+      
         wres[i] = res[i]/sigma_tmp;
         iwres[i] = ires[i]/sigma_tmp;
-        
-      }
+      }  
     }
   }
 }

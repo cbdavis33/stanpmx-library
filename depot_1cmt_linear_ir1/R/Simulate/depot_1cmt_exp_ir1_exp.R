@@ -80,7 +80,7 @@ nonmem_data_simulate_pd <- dosing_data %>%
   mutate(AMT = 0,
          ADDL = 0,
          II = 0,
-         CMT = 4,
+         CMT = 3,
          EVID = 0,
          # RATE = 0,
          TIME = times_to_simulate_pd) %>% 
@@ -143,7 +143,7 @@ model <- cmdstan_model(
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               # seed = 11235,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
@@ -182,8 +182,9 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   ungroup() %>% 
                   filter(!is.na(DV), CMT == 2) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
-                                                CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                CMT == 3 ~ "PD",
+                                                # .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
@@ -200,10 +201,11 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                   group_by(ID) %>% 
                   mutate(Dose = factor(max(AMT))) %>% 
                   ungroup() %>% 
-                  filter(!is.na(DV), CMT == 4) %>% 
+                  filter(!is.na(DV), CMT == 3) %>% 
                   mutate(cmt = factor(case_when(CMT == 2 ~ "PK",
-                                                CMT == 4 ~ "PD",
-                                                .default = "Dosing"),
+                                                CMT == 3 ~ "PD",
+                                                # .default = "Dosing"),
+                                                TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +

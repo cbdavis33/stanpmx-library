@@ -211,7 +211,7 @@ generated quantities{
       }else{
         
         x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt_rk45(depot_2cmt_ir1_ode_coupled,
+          pmx_solve_onecpt_rk45(depot_1cmt_ir1_ode_coupled,
                                 n_cmt_pd,
                                 time[subj_start[j]:subj_end[j]],
                                 amt[subj_start[j]:subj_end[j]],
@@ -230,7 +230,7 @@ generated quantities{
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           ipred[k] = x_ipred[k, 2] / VC[j];
-        }else if(cmt[k] == 4){
+        }else if(cmt[k] == 3){
           ipred[k] = x_ipred[k, 3] + r_0[j];
         }
       }
@@ -242,7 +242,7 @@ generated quantities{
          dv[i] = 0;
       }else{
         
-        if(cmt[i] == 2 || cmt[i] == 4){
+        if(cmt[i] == 2 || cmt[i] == 3){
           real log_ipred_tmp = log(ipred[i]);
           real sigma_tmp = cmt[i] == 2 ? sigma : sigma_pd;
           

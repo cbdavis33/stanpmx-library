@@ -253,7 +253,7 @@ generated quantities{
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           ipred[k] = x_ipred[k, 2] / VC[j];
-        }else if(cmt[k] == 4){
+        }else if(cmt[k] == 3){
           ipred[k] = x_ipred[k, 3] + r_0[j];
         }
         auc[k] = x_ipred[k, 4] / VC[j];
@@ -275,18 +275,12 @@ generated quantities{
          dv[i] = 0;
       }else{
         
-        real ipred_tmp = ipred[i];
-        
-        if(cmt[i] == 2){
+        if(cmt[i] == 2 || cmt[i] == 3){
+          real ipred_tmp = ipred[i];
+          real sigma_tmp = cmt[i] == 2 ? 
+            sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] + 2*ipred_tmp*Sigma[2, 1]) :
+            sqrt(square(ipred_tmp) * Sigma_pd[1, 1] + Sigma_pd[2, 2] + 2*ipred_tmp*Sigma_pd[2, 1]);
           
-          real sigma_tmp = sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] +
-                                2*ipred_tmp*Sigma[2, 1]);
-          dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-          
-        }else if(cmt[i] == 4){
-          
-          real sigma_tmp = sqrt(square(ipred_tmp) * Sigma_pd[1, 1] + 
-                                Sigma_pd[2, 2] + 2*ipred_tmp*Sigma_pd[2, 1]);
           dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
           
         }
@@ -294,5 +288,4 @@ generated quantities{
     }
   }
 }
-
 

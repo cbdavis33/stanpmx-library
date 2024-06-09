@@ -45,7 +45,7 @@ functions{
     vector[3] dydt;
 
     dydt[1] = -ka*y[1];
-    dydt[2] = ka*y[1] -ke*y[2];
+    dydt[2] = ka*y[1] - ke*y[2];
     dydt[3] = kin*(1 - inh) - kout*response;
     
     return dydt;
@@ -254,7 +254,7 @@ generated quantities{
                                 addl[subj_start[j]:subj_end[j]],
                                 ss[subj_start[j]:subj_end[j]],
                                 {CL[j], VC[j], KA[j], 
-                                 KIN[j], KOUT[j], IC50[j], imax, hill, r_0[j]}, 
+                                 KIN[j], KOUT[j], IC50[j], imax, hill, r_0[j]},
                                 bioav, tlag)';
                          
       }
@@ -262,7 +262,7 @@ generated quantities{
       for(k in subj_start[j]:subj_end[j]){
         if(cmt[k] == 2){
           ipred[k] = x_ipred[k, 2] / VC[j];
-        }else if(cmt[k] == 4){
+        }else if(cmt[k] == 3){
           ipred[k] = x_ipred[k, 3] + r_0[j];
         }
       }
@@ -274,18 +274,12 @@ generated quantities{
          dv[i] = 0;
       }else{
         
-        real ipred_tmp = ipred[i];
-        
-        if(cmt[i] == 2){
+        if(cmt[i] == 2 || cmt[i] == 3){
+          real ipred_tmp = ipred[i];
+          real sigma_tmp = cmt[i] == 2 ? 
+            sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] + 2*ipred_tmp*Sigma[2, 1]) :
+            sqrt(square(ipred_tmp) * Sigma_pd[1, 1] + Sigma_pd[2, 2] + 2*ipred_tmp*Sigma_pd[2, 1]);
           
-          real sigma_tmp = sqrt(square(ipred_tmp) * Sigma[1, 1] + Sigma[2, 2] +
-                                2*ipred_tmp*Sigma[2, 1]);
-          dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-          
-        }else if(cmt[i] == 4){
-          
-          real sigma_tmp = sqrt(square(ipred_tmp) * Sigma_pd[1, 1] + 
-                                Sigma_pd[2, 2] + 2*ipred_tmp*Sigma_pd[2, 1]);
           dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
           
         }
@@ -293,5 +287,6 @@ generated quantities{
     }
   }
 }
+
 
 
