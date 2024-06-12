@@ -276,3 +276,32 @@ fit_bdf_coupled <- model$sample(
 fit_bdf_coupled$save_object(
   "depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_bdf_coupled.rds")
 
+
+stan_data$solver <- 5
+fit_adams <- model$sample(
+  data = stan_data,
+  seed = 112358,
+  chains = 4,
+  parallel_chains = 4,
+  threads_per_chain = parallel::detectCores()/4,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  adapt_delta = 0.8,
+  refresh = 50,
+  max_treedepth = 10,
+  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
+                         TVVC = rlnorm(1, log(18), 0.3),
+                         TVQ = rlnorm(1, log(2), 0.3),
+                         TVVP = rlnorm(1, log(40), 0.3),
+                         TVKA = rlnorm(1, log(1), 0.3),
+                         omega = rlnorm(5, log(0.3), 0.3),
+                         sigma_p = rlnorm(1, log(0.2), 0.3),
+                         TVMTT = rlnorm(1, log(120), 0.3),
+                         TVCIRC0 = rlnorm(1, log(5), 0.3),
+                         TVGAMMA = rlnorm(1, log(0.2), 0.3),
+                         TVALPHA = rlnorm(1, log(3e-4), 0.3),
+                         omega_pd = rlnorm(4, log(0.35), 0.3),
+                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
+
+fit_adams$save_object(
+  "depot_2cmt_linear_friberg/Stan/Fits/depot_2cmt_prop_friberg_prop_adams.rds")

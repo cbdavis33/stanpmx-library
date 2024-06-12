@@ -229,7 +229,7 @@ functions{
                         {CL[j], VC[j], Q[j], VP[j], KA[j], 
                          MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
                          
-      }else{
+      }else if(solver == 4){
         
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
@@ -246,6 +246,22 @@ functions{
                                 MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]}, 
                                bioav, tlag)';
         
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_adams(depot_2cmt_friberg_ode,
+                          n_cmt + n_cmt_pd,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {CL[j], VC[j], Q[j], VP[j], KA[j], 
+                           MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
+                         
       }
                       
       for(k in subj_start[j]:subj_end[j]){
@@ -355,7 +371,7 @@ data{
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
   
-  int<lower = 1, upper = 4> solver; // 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf
+  int<lower = 1, upper = 5> solver; // 1 = General rk45, 2 = Coupled rk45, 3 = General bdf, 4 = Coupled bdf, 5 = Adams
  
 }
 transformed data{ 
@@ -737,7 +753,7 @@ generated quantities{
                         {TVCL, TVVC, TVQ, TVVP, TVKA, 
                          TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
                          
-      }else{
+      }else if(solver == 4){
         
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_twocpt_bdf(depot_2cmt_friberg_ode_coupled,
@@ -768,6 +784,36 @@ generated quantities{
                                {TVCL, TVQ, TVVC, TVVP, TVKA, 
                                 TVMTT, TVCIRC0, TVGAMMA, TVALPHA}, 
                                bioav, tlag)';
+        
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_adams(depot_2cmt_friberg_ode,
+                          n_cmt + n_cmt_pd,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {CL[j], VC[j], Q[j], VP[j], KA[j], 
+                           MTT[j], CIRC0[j], GAMMA[j], ALPHA[j]})';
+                          
+        x_pred[subj_start[j]:subj_end[j],] =
+          pmx_solve_adams(depot_2cmt_friberg_ode,
+                          n_cmt + n_cmt_pd,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {TVCL, TVVC, TVQ, TVVP, TVKA, 
+                           TVMTT, TVCIRC0, TVGAMMA, TVALPHA})';
         
       }
       
