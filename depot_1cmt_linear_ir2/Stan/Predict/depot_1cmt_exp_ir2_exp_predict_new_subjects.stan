@@ -38,8 +38,8 @@ functions{
     real z_pk = t <= t_1 || (slope_pk > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
     real slope_pd = kin - kout*(1 - inh)*response;
-    real x_pd = slope_pd < 0 && y[3] < y[8] ? slope_pd : 0;
-    real z_pd = t <= t_1 || (slope_pd < 0 && t >= t_1 && t <= t_2) ? 1 : 0;
+    real x_pd = slope_pd > 0 && y[3] > y[8] ? slope_pd : 0;
+    real z_pd = t <= t_1 || (slope_pd > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
     vector[9] dydt;
 
@@ -50,8 +50,8 @@ functions{
     dydt[5] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
     dydt[6] = x_pk;                                // C_max 
     dydt[7] = z_pk;                                // t_max for PK
-    dydt[8] = x_pd;                                // R_min
-    dydt[9] = z_pd;                                // t_min for PD
+    dydt[8] = x_pd;                                // R_max
+    dydt[9] = z_pd;                                // t_max for PD
     
     return dydt;
   }
@@ -134,8 +134,8 @@ generated quantities{
   vector[n_subjects_new] c_max;   // Cmax between t1 and t2 (c_max_ss)
   vector[n_subjects_new] t_max;   // Tmax between t1 and t2, then subtract off t1
   vector[n_subjects_new] t_half;  // half-life
-  vector[n_subjects_new] r_min;   // Minimum response
-  vector[n_subjects_new] t_min;   // Tmin for PD
+  vector[n_subjects_new] r_max;   // Maximum response
+  vector[n_subjects_new] t_max_pd;// Tmax for PD
   
   vector[n_subjects_new] CL;
   vector[n_subjects_new] VC;
@@ -236,8 +236,8 @@ generated quantities{
       t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
       t_half[j] = log(2)/(CL[j]/VC[j]);
       
-      r_min[j] = min(x_ipred[subj_start[j]:subj_end[j], 8]) + r_0[j];
-      t_min[j] = max(x_ipred[subj_start[j]:subj_end[j], 9]) - t_1;
+      r_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 8]) + r_0[j];
+      t_max_pd[j] = max(x_ipred[subj_start[j]:subj_end[j], 9]) - t_1;
     
     }
 

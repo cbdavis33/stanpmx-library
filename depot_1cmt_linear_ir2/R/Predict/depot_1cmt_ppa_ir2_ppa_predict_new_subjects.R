@@ -292,7 +292,7 @@ ggpubr::ggarrange(p_pk_check, p_pd_check, ncol = 2)
 est_ind <- preds_df %>%
   spread_draws(c(CL, VC, KA, 
                  auc_ss, c_max, t_max, t_half,
-                 KIN, KOUT, IC50, t_min, r_min)[ID]) %>% 
+                 KIN, KOUT, IC50, t_max_pd, r_max)[ID]) %>% 
   median_qi() %>% 
   inner_join(post_preds_summary %>% 
                filter(time == 168, cmt == "PK") %>% 

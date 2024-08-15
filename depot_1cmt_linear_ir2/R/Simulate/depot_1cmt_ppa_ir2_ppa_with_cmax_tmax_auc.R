@@ -33,12 +33,12 @@ R_pd <- diag(rep(1, times = 3))
 R_pd[1, 2] <- R_pd[2, 1] <- 0.7 # Put in some correlation between KIN and KOUT
 
 sigma_p <- 0.2
-sigma_a <- 0 # LLOQ = 1
+sigma_a <- 0.5 # LLOQ = 1
 
 cor_p_a <- 0
 
 sigma_p_pd <- 0.15
-sigma_a_pd <- 0 # LLOQ = 2
+sigma_a_pd <- 1 # LLOQ = 2
 
 cor_p_a_pd <- 0
 
@@ -163,17 +163,17 @@ simulated_data <- model$sample(data = stan_data,
 params_ind <- simulated_data$draws(c("CL", "VC", "KA",
                                      "KIN", "KOUT", "IC50",
                                      "auc_t1_t2", "c_max", "t_max", 
-                                     "t_half", "r_min", "t_min")) %>% 
+                                     "t_half", "r_max", "t_max_pd")) %>% 
   spread_draws(c(CL, VC, KA, KIN, KOUT, IC50,
                  auc_t1_t2, c_max, t_max,
-                 t_half, r_min, t_min)[i]) %>% 
+                 t_half, r_max, t_max_pd)[i]) %>% 
   inner_join(dosing_data %>% 
                mutate(i = 1:n()),
              by = "i") %>% 
   ungroup() %>%
   select(ID, CL, VC, KA, KIN, KOUT, IC50,
          auc_t1_t2, c_max, t_max,
-         t_half, r_min, t_min)
+         t_half, r_max, t_max_pd)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(c(dv, ipred)[i]) %>% 
@@ -242,11 +242,11 @@ p_pk +
 
 data %>%
   select(-IPRED) %>% 
-  # write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_ppa_ir2_ppa.csv", na = ".")
-  write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_prop_ir2_prop.csv", na = ".")
+  write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_ppa_ir2_ppa.csv", na = ".")
+  # write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_prop_ir2_prop.csv", na = ".")
 
 params_ind %>%
-  # write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_ppa_ir2_ppa_params_ind.csv")
-  write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_prop_ir2_prop_params_ind.csv")
+  write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_ppa_ir2_ppa_params_ind.csv")
+  # write_csv("depot_1cmt_linear_ir2/Data/depot_1cmt_prop_ir2_prop_params_ind.csv")
 
 

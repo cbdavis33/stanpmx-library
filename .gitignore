@@ -12,6 +12,7 @@
 *.exe 
 *.rds
 *.json
+*.zip
 README.html
 
 *_cache

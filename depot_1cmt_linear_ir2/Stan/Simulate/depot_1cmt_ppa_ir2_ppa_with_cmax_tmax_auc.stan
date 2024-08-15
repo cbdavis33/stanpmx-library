@@ -11,9 +11,9 @@
 // PK output includes individual Cmax over the whole time period, Tmax between 
 //   t1 and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like 
 //   a dosing interval)
-// PD output includes individual Rmin (response decreases to a min), and Tmin
+// PD output includes individual Rmax (response increases to a max), and Tmax
 //   betweem t1 and t2 (like the time within a dosing interval at which the 
-//   minimum is reached)
+//   maximum is reached)
 
 functions{
   
@@ -54,8 +54,8 @@ functions{
     real z_pk = t <= t_1 || (slope_pk > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
     real slope_pd = kin - kout*(1 - inh)*response;
-    real x_pd = slope_pd < 0 && y[3] < y[8] ? slope_pd : 0;
-    real z_pd = t <= t_1 || (slope_pd < 0 && t >= t_1 && t <= t_2) ? 1 : 0;
+    real x_pd = slope_pd > 0 && y[3] > y[8] ? slope_pd : 0;
+    real z_pd = t <= t_1 || (slope_pd > 0 && t >= t_1 && t <= t_2) ? 1 : 0;
     
     vector[9] dydt;
 
@@ -66,8 +66,8 @@ functions{
     dydt[5] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
     dydt[6] = x_pk;                                // C_max 
     dydt[7] = z_pk;                                // t_max for PK
-    dydt[8] = x_pd;                                // R_min
-    dydt[9] = z_pd;                                // t_min for PD
+    dydt[8] = x_pd;                                // R_max
+    dydt[9] = z_pd;                                // t_max for PD
     
     return dydt;
   }
@@ -137,7 +137,7 @@ transformed data{
   
   int n_cmt = 2;       // number of ODEs in PK model (depot, central)
   int n_cmt_pd = 1;    // number of ODEs in PD system
-  int n_cmt_extra = 6; // number of ODEs for AUC, Tmax, Rmin, ...
+  int n_cmt_extra = 6; // number of ODEs for AUC, Tmax, Rmax, ...
 
   vector[n_random] omega = [omega_cl, omega_vc, omega_ka]';
                                
@@ -185,8 +185,8 @@ generated quantities{
   vector[n_subjects] c_max;       // Cmax
   vector[n_subjects] t_max;       // Tmax foor PK
   vector[n_subjects] t_half;      // half-life
-  vector[n_subjects] r_min;       // Minimum response
-  vector[n_subjects] t_min;       // Tmin for PD
+  vector[n_subjects] r_max;       // Maximum response
+  vector[n_subjects] t_max_pd;    // Tmax for PD
   
   vector[n_subjects] CL;
   vector[n_subjects] VC;
@@ -264,8 +264,8 @@ generated quantities{
       t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
       t_half[j] = log(2)/(CL[j]/VC[j]);
       
-      r_min[j] = min(x_ipred[subj_start[j]:subj_end[j], 8]) + r_0[j];
-      t_min[j] = max(x_ipred[subj_start[j]:subj_end[j], 9]) - t_1;
+      r_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 8]) + r_0[j];
+      t_max_pd[j] = max(x_ipred[subj_start[j]:subj_end[j], 9]) - t_1;
       
     }
     
