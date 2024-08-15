@@ -153,17 +153,17 @@ simulated_data <- model$sample(data = stan_data,
 params_ind <- simulated_data$draws(c("CL", "VC", "KA",
                                      "KIN", "KOUT", "IC50",
                                      "auc_t1_t2", "c_max", "t_max", 
-                                     "t_half", "r_min", "t_min")) %>% 
+                                     "t_half", "r_max", "t_max_pd")) %>% 
   spread_draws(c(CL, VC, KA, KIN, KOUT, IC50,
                  auc_t1_t2, c_max, t_max,
-                 t_half, r_min, t_min)[i]) %>% 
+                 t_half, r_max, t_max_pd)[i]) %>% 
   inner_join(dosing_data %>% 
                mutate(i = 1:n()),
              by = "i") %>% 
   ungroup() %>%
   select(ID, CL, VC, KA, KIN, KOUT, IC50,
          auc_t1_t2, c_max, t_max,
-         t_half, r_min, t_min)
+         t_half, r_max, t_max_pd)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(c(dv, ipred)[i]) %>% 

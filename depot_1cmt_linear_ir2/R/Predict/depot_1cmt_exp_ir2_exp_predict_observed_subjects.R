@@ -214,11 +214,11 @@ for(i in 1:ggforce::n_pages(tmp)){
 est_ind <- preds_df %>%
   spread_draws(c(CL, VC, KA, 
                  auc_ss, c_max, t_max, t_half,
-                 KIN, KOUT, IC50, t_min, r_min)[ID]) %>% 
+                 KIN, KOUT, IC50, t_max_pd, r_max)[ID]) %>% 
   mean_qi() %>% 
   select(ID, CL, VC, KA, 
          auc_ss, c_max, t_max, t_half,
-         KIN, KOUT, IC50, t_min, r_min) %>% 
+         KIN, KOUT, IC50, t_max_pd, r_max) %>% 
   inner_join(post_preds_summary %>% 
                filter(time == 168, cmt == "PK") %>% 
                select(ID, c_trough = "ipred") %>% 
