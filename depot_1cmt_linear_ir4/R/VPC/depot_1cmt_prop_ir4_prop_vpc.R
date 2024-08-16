@@ -11,10 +11,10 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_1cmt_linear_ir3/Stan/Fits/depot_1cmt_prop_ir3_prop.rds")
+fit <- read_rds("depot_1cmt_linear_ir4/Stan/Fits/depot_1cmt_prop_ir4_prop.rds")
 
 nonmem_data <- read_csv(
-  "depot_1cmt_linear_ir3/Data/depot_1cmt_prop_ir3_prop.csv",
+  "depot_1cmt_linear_ir4/Data/depot_1cmt_prop_ir4_prop.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -61,7 +61,7 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_ir3/Stan/Predict/depot_1cmt_prop_ir3_prop_predict_new_subjects.stan")
+  "depot_1cmt_linear_ir4/Stan/Predict/depot_1cmt_prop_ir4_prop_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit %>%
                                      as_draws_array() %>%

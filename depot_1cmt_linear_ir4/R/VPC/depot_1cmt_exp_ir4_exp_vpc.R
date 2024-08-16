@@ -11,10 +11,10 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_1cmt_linear_ir3/Stan/Fits/depot_1cmt_prop_ir3_prop.rds")
+fit <- read_rds("depot_1cmt_linear_ir4/Stan/Fits/depot_1cmt_exp_ir4_exp.rds")
 
 nonmem_data <- read_csv(
-  "depot_1cmt_linear_ir3/Data/depot_1cmt_prop_ir3_prop.csv",
+  "depot_1cmt_linear_ir4/Data/depot_1cmt_exp_ir4_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -61,7 +61,7 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_ir3/Stan/Predict/depot_1cmt_prop_ir3_prop_predict_new_subjects.stan")
+  "depot_1cmt_linear_ir4/Stan/Predict/depot_1cmt_exp_ir4_exp_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit %>%
                                      as_draws_array() %>%
@@ -106,25 +106,25 @@ obs <- nonmem_data %>%
                    filter(cmt == 2), 
                  obs = obs %>% 
                    filter(cmt == 2),
-              sim_cols = list(idv = "time",
-                              dv = "dv",
-                              id = "ID",
-                              pred = "pred",
-                              sim = "sim"),
-              obs_cols = list(dv = "dv",
-                              idv = "time",
-                              id = "ID",
-                              pred = "pred"),
-              show = list(obs_dv = TRUE, 
-                          obs_ci = TRUE,
-                          pi = TRUE,
-                          pi_as_area = FALSE,
-                          pi_ci = TRUE,
-                          obs_median = TRUE,
-                          sim_median = TRUE,
-                          sim_median_ci = TRUE),
-              log_y = TRUE,
-              lloq = 1) +
+                 sim_cols = list(idv = "time",
+                                 dv = "dv",
+                                 id = "ID",
+                                 pred = "pred",
+                                 sim = "sim"),
+                 obs_cols = list(dv = "dv",
+                                 idv = "time",
+                                 id = "ID",
+                                 pred = "pred"),
+                 show = list(obs_dv = TRUE, 
+                             obs_ci = TRUE,
+                             pi = TRUE,
+                             pi_as_area = FALSE,
+                             pi_ci = TRUE,
+                             obs_median = TRUE,
+                             sim_median = TRUE,
+                             sim_median_ci = TRUE),
+                 log_y = TRUE,
+                 lloq = 1) +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "identity") +
     scale_x_continuous(name = "Time (h)",
@@ -133,28 +133,28 @@ obs <- nonmem_data %>%
     theme_bw())
 
 (p_pcvpc_pk <- vpc(sim = sim %>% 
-                  filter(cmt == 2), 
-                obs = obs %>% 
-                  filter(cmt == 2),
-                sim_cols = list(idv = "time",
-                                dv = "dv",
-                                id = "ID",
-                                pred = "pred_mean",
-                                sim = "sim"),
-                obs_cols = list(dv = "dv",
-                                idv = "time",
-                                id = "ID",
-                                pred = "pred_mean"),
-                pred_corr = TRUE,
-                show = list(obs_dv = TRUE, 
-                            obs_ci = TRUE,
-                            pi = TRUE,
-                            pi_as_area = FALSE,
-                            pi_ci = TRUE,
-                            obs_median = TRUE,
-                            sim_median = TRUE,
-                            sim_median_ci = TRUE),
-                log_y = TRUE) +
+                     filter(cmt == 2), 
+                   obs = obs %>% 
+                     filter(cmt == 2),
+                   sim_cols = list(idv = "time",
+                                   dv = "dv",
+                                   id = "ID",
+                                   pred = "pred_mean",
+                                   sim = "sim"),
+                   obs_cols = list(dv = "dv",
+                                   idv = "time",
+                                   id = "ID",
+                                   pred = "pred_mean"),
+                   pred_corr = TRUE,
+                   show = list(obs_dv = TRUE, 
+                               obs_ci = TRUE,
+                               pi = TRUE,
+                               pi_as_area = FALSE,
+                               pi_ci = TRUE,
+                               obs_median = TRUE,
+                               sim_median = TRUE,
+                               sim_median_ci = TRUE),
+                   log_y = TRUE) +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "log10") +
     scale_x_continuous(name = "Time (h)",
