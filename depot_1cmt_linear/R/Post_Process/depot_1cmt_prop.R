@@ -29,7 +29,8 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
+# fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
+fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop_epred.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
@@ -81,7 +82,7 @@ mcmc_rank_hist(fit$draws(c("omega_cl", "omega_vc", "omega_ka")))
 mcmc_rank_hist(fit$draws(c("sigma_p")))
 
 ## Check Leave-One-Out Cross-Validation
-fit_loo <- fit$loo(cores = min(4, parallel::detectCores()/2))
+fit_loo <- fit$loo()
 fit_loo
 plot(fit_loo, label_points = TRUE)
 
@@ -89,20 +90,39 @@ draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
-  spread_draws(c(pred, ipred, dv_ppc)[i]) %>%
-  mean_qi(pred, ipred, dv_ppc) %>%
+  spread_draws(pred[i], epred[i], ipred[i], dv_ppc[i]) %>%
+  mean_qi(pred, epred, ipred, dv_ppc, .width = 0.90) %>%
   mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
          ID = nonmem_data$ID[nonmem_data$evid == 0][i],
          time = nonmem_data$time[nonmem_data$evid == 0][i])
 
+post_preds_summary %>% 
+  mutate(in_epred_interval = between(DV, epred.lower, epred.upper),
+         in_ppc_interval = between(DV, dv_ppc.lower, dv_ppc.upper)) %>% 
+  summarize(across(c(in_epred_interval, in_ppc_interval), mean))
+
 p_dv_vs_pred <- ggplot(post_preds_summary %>% 
                          filter(bloq == 0), aes(x = pred, y = DV)) +
   geom_point() +
+  # geom_errorbarh(aes(xmin = pred.lower, xmax = pred.upper)) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
   geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
-  xlab("Population Predictions") +
+  xlab("Population Predictions (PRED)") +
+  ylab("Observed Concentration") +
+  theme(axis.text = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 18, face = "bold"),
+        axis.line = element_line(linewidth = 2))
+
+p_dv_vs_epred <- ggplot(post_preds_summary %>% 
+                          filter(bloq == 0), aes(x = epred, y = DV)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = epred.lower, xmax = epred.upper)) +
+  theme_bw() +
+  geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
+  geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
+  xlab("Population Predictions (EPRED)") +
   ylab("Observed Concentration") +
   theme(axis.text = element_text(size = 14, face = "bold"),
         axis.title = element_text(size = 18, face = "bold"),
@@ -111,6 +131,7 @@ p_dv_vs_pred <- ggplot(post_preds_summary %>%
 p_dv_vs_ipred <- ggplot(post_preds_summary %>% 
                           filter(bloq == 0), aes(x = ipred, y = DV)) +
   geom_point() +
+  geom_errorbarh(aes(xmin = ipred.lower, xmax = ipred.upper)) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
   geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
@@ -120,13 +141,34 @@ p_dv_vs_ipred <- ggplot(post_preds_summary %>%
         axis.title = element_text(size = 18, face = "bold"),
         axis.line = element_line(linewidth = 2))
 
+p_dv_vs_ppc <- ggplot(post_preds_summary %>% 
+                        filter(bloq == 0), aes(x = dv_ppc, y = DV)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = dv_ppc.lower, xmax = dv_ppc.upper)) +
+  theme_bw() +
+  geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
+  geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
+  xlab("Individual Predictions (PPC)") +
+  ylab("Observed Concentration") +
+  theme(axis.text = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 18, face = "bold"),
+        axis.line = element_line(linewidth = 2))
+
 p_dv_vs_pred + 
-  p_dv_vs_ipred
+  p_dv_vs_epred +
+  p_dv_vs_ipred +
+  p_dv_vs_ppc
 
 (p_dv_vs_pred +
     scale_y_log10() +
     scale_x_log10()) +
+  (p_dv_vs_epred +
+     scale_y_log10() +
+     scale_x_log10()) +
   (p_dv_vs_ipred +
+     scale_y_log10() +
+     scale_x_log10()) +
+  (p_dv_vs_ppc +
      scale_y_log10() +
      scale_x_log10())
 
@@ -176,7 +218,8 @@ for(i in 1:ggforce::n_pages(tmp)){
 
 ## Look at residuals and epsilon shrinkage
 residuals <- draws_df %>%
-  spread_draws(c(res, wres, ires, iwres, ipred)[i]) %>% 
+  spread_draws(c(res, wres, eres, ewres, epred, 
+                 ires, iwres, ipred)[i]) %>% 
   mutate(time = nonmem_data$time[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i])
 
