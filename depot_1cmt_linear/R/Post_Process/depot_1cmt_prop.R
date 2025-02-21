@@ -29,8 +29,7 @@ nonmem_data %>%
 
 
 ## Read in fit
-# fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
-fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop_epred.rds")
+fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_prop.rds")
 
 ## Summary of parameter estimates
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
@@ -90,22 +89,29 @@ draws_df <- fit$draws(format = "draws_df")
 
 # Look at predictions
 post_preds_summary <- draws_df %>%
-  spread_draws(pred[i], epred[i], ipred[i], dv_ppc[i]) %>%
-  mean_qi(pred, epred, ipred, dv_ppc, .width = 0.90) %>%
+  spread_draws(c(pred, epred_stan, epred, ipred, dv_ppc)[i]) %>% 
+  mean_qi(pred, epred_stan, epred, ipred, dv_ppc, .width = 0.95) %>%
   mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
+         lloq = nonmem_data$lloq[nonmem_data$evid == 0][i],
          ID = nonmem_data$ID[nonmem_data$evid == 0][i],
-         time = nonmem_data$time[nonmem_data$evid == 0][i])
+         time = nonmem_data$time[nonmem_data$evid == 0][i]) %>% 
+  mutate(DV = if_else(bloq == 1, runif(n(), 0.4*lloq, 0.6*lloq), DV))
 
 post_preds_summary %>% 
-  mutate(in_epred_interval = between(DV, epred.lower, epred.upper),
+  filter(bloq == 0) %>% 
+  mutate(in_epred_stan_interval = between(DV, epred_stan.lower, epred_stan.upper),
+         in_epred_interval = between(DV, epred.lower, epred.upper),
+         in_ipred_interval = between(DV, ipred.lower, ipred.upper),
          in_ppc_interval = between(DV, dv_ppc.lower, dv_ppc.upper)) %>% 
-  summarize(across(c(in_epred_interval, in_ppc_interval), mean))
+  summarize(across(c(in_epred_stan_interval, in_epred_interval, 
+                     in_ipred_interval, in_ppc_interval), mean))
 
-p_dv_vs_pred <- ggplot(post_preds_summary %>% 
-                         filter(bloq == 0), aes(x = pred, y = DV)) +
+p_dv_vs_pred <- ggplot(post_preds_summary, # %>% filter(bloq == 0), 
+                       aes(x = pred, y = DV, color = factor(bloq))) +
   geom_point() +
-  # geom_errorbarh(aes(xmin = pred.lower, xmax = pred.upper)) +
+  scale_color_manual(guide = "none",
+                     values = c("0" = "black", "1" = "green")) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
   geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
@@ -115,9 +121,11 @@ p_dv_vs_pred <- ggplot(post_preds_summary %>%
         axis.title = element_text(size = 18, face = "bold"),
         axis.line = element_line(linewidth = 2))
 
-p_dv_vs_epred <- ggplot(post_preds_summary %>% 
-                          filter(bloq == 0), aes(x = epred, y = DV)) +
+p_dv_vs_epred <- ggplot(post_preds_summary, # %>% filter(bloq == 0),  
+                        aes(x = epred, y = DV, color = factor(bloq))) +
   geom_point() +
+  scale_color_manual(guide = "none",
+                     values = c("0" = "black", "1" = "green")) +
   geom_errorbarh(aes(xmin = epred.lower, xmax = epred.upper)) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
@@ -128,22 +136,25 @@ p_dv_vs_epred <- ggplot(post_preds_summary %>%
         axis.title = element_text(size = 18, face = "bold"),
         axis.line = element_line(linewidth = 2))
 
-p_dv_vs_ipred <- ggplot(post_preds_summary %>% 
-                          filter(bloq == 0), aes(x = ipred, y = DV)) +
+p_dv_vs_ipred <- ggplot(post_preds_summary, # %>% filter(bloq == 0),  
+                        aes(x = pred, y = DV, color = factor(bloq))) +
   geom_point() +
-  geom_errorbarh(aes(xmin = ipred.lower, xmax = ipred.upper)) +
+  scale_color_manual(guide = "none",
+                     values = c("0" = "black", "1" = "green")) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
   geom_smooth(color = "red", se = FALSE, linewidth = 1.5) +
-  xlab("Individual Predictions") +
+  xlab("Individual Predictions (IPRED)") +
   ylab("Observed Concentration") +
   theme(axis.text = element_text(size = 14, face = "bold"),
         axis.title = element_text(size = 18, face = "bold"),
         axis.line = element_line(linewidth = 2))
 
-p_dv_vs_ppc <- ggplot(post_preds_summary %>% 
-                        filter(bloq == 0), aes(x = dv_ppc, y = DV)) +
+p_dv_vs_ppc <- ggplot(post_preds_summary, # %>% filter(bloq == 0), 
+                      aes(x = dv_ppc, y = DV, color = factor(bloq))) +
   geom_point() +
+  scale_color_manual(guide = "none",
+                     values = c("0" = "black", "1" = "green")) +
   geom_errorbarh(aes(xmin = dv_ppc.lower, xmax = dv_ppc.upper)) +
   theme_bw() +
   geom_abline(slope = 1, intercept = 0, color = "blue", linewidth = 1.5) +
@@ -179,26 +190,25 @@ tmp <- ggplot(post_preds_summary) +
 
 for(i in 1:ggforce::n_pages(tmp)){
   print(ggplot() +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = ipred.lower, 
-                                    ymax = ipred.upper, group = ID),
-                      fill = "blue", alpha = 0.5, show.legend = FALSE) +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = dv_ppc.lower, 
-                                    ymax = dv_ppc.upper, group = ID),
-                      fill = "blue", alpha = 0.25, show.legend = FALSE) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = ipred, 
-                                  group = ID),
-                    linetype = 1, linewidth = 1.15) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = pred, 
-                                  group = ID),
-                    linetype = 2, linewidth = 1.05) +
-          geom_point(data = post_preds_summary %>% 
-                       filter(bloq == 0), 
-                     mapping = aes(x = time, y = DV, group = ID),
-                     size = 2, color = "red", show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, y = ipred, ymin = ipred.lower,
+                                        ymax = ipred.upper, group = ID),
+                          fill = "blue", color = "blue", linewidth = 2,
+                          alpha = 0.5, show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, ymin = dv_ppc.lower,
+                                        ymax = dv_ppc.upper, group = ID),
+                          fill = "blue", linewidth = 2, 
+                          alpha = 0.25, show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, y = epred, ymin = epred.lower,
+                                        ymax = epred.upper, group = ID),
+                          fill = "red", color = "red", linewidth = 2,
+                          alpha = 0.25, show.legend = FALSE) +
+          geom_point(data = post_preds_summary, # %>% filter(bloq == 0),
+                     mapping = aes(x = time, y = DV, group = ID, color = factor(bloq)),
+                     size = 2, show.legend = FALSE) +
+          scale_color_manual(values = c("0" = "black", "1" = "green")) +
           scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                              limits = c(NA, NA),
                              trans = "identity") +
@@ -216,11 +226,16 @@ for(i in 1:ggforce::n_pages(tmp)){
   
 }
 
-## Look at residuals and epsilon shrinkage
+## Look at residuals and epsilon shrinkage - I think there are two ways to look
+## at this, both of which have value:
+##   1) by draw 
+##   2) using posterior summaries
+
+# Look at it by draw first
 residuals <- draws_df %>%
-  spread_draws(c(res, wres, eres, ewres, epred, 
-                 ires, iwres, ipred)[i]) %>% 
+  spread_draws(c(iwres, ipred)[i]) %>% 
   mutate(time = nonmem_data$time[nonmem_data$evid == 0][i],
+         ID = nonmem_data$ID[nonmem_data$evid == 0][i],
          bloq = nonmem_data$bloq[nonmem_data$evid == 0][i])
 
 (shrinkage_eps <- residuals %>% 	
