@@ -207,6 +207,8 @@ data{
   real<lower = 0> scale_sigma_p;  // Prior Scale parameter for proportional error
   real<lower = 0> scale_sigma_a;  // Prior Scale parameter for additive error
   
+  real<lower = 0> lkj_df_sigma;   // Prior degrees of freedom for sigma cor mat
+  
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
   int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
                                                         // generated quantities. Useful
@@ -335,6 +337,7 @@ model{
   L ~ lkj_corr_cholesky(lkj_df_omega);
   
   sigma ~ normal(0, scale_sigma);
+  L_Sigma ~ lkj_corr_cholesky(lkj_df_sigma);
   
   to_vector(Z) ~ std_normal();
   
