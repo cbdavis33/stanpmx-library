@@ -12,15 +12,20 @@ set_cmdstan_path("~/Torsten/cmdstan")
 locf <- FALSE
 
 file_path <- if_else(isTRUE(locf), 
-                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_exp_covariates_time_varying_generic_locf.csv",
-                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_exp_covariates_time_varying_generic_nocb.csv")
-
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_locf.csv",
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_nocb.csv")
 
 fit <- if(isTRUE(locf)){
-  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/exp_locf.rds")
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_fixed_allometric_locf.rds")
 }else{
-  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/exp_nocb.rds")
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_fixed_allometric_nocb.rds")
 }
+
+
+stan_data <- jsonlite::read_json(
+  str_c("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/Stan_Data/", 
+        "prop_fixed_allometric_nocb.json")) %>% 
+  map(function(x) if(is.list(x)) as_vector(x) else x)
 
 
 nonmem_data <- read_csv(
@@ -57,7 +62,7 @@ t1 <- dosing_data %>%
   distinct() %>% 
   deframe()
 
-times_new <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 2)))))
+times_new <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 0.5)))))
 
 new_data <- bind_rows(replicate(max(dosing_data$ID), times_new, 
                                 simplify = FALSE)) %>% 
@@ -123,13 +128,15 @@ stan_data <- list(n_subjects = n_subjects,
                   egfr = egfr,
                   t_1 = 144,
                   t_2 = 168,
-                  want_auc_cmax = 0)
+                  want_auc_cmax = 0,
+                  theta_cl_wt = stan_data$theta_cl_wt,
+                  theta_vc_wt = stan_data$theta_vc_wt)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_exp_predict_new_subjects_covariates_time_varying.stan")
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_prop_predict_new_subjects_covariates_fixed_allometric_time_varying.stan")
 
 preds <- model$generate_quantities(fit$draws() %>%
-                                     thin_draws(20),
+                                     thin_draws(10),
                                    data = stan_data,
                                    parallel_chains = 4,
                                    seed = 1234)

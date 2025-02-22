@@ -27,9 +27,11 @@ R <- diag(rep(1, times = 3))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0
+sigma_a <- 0.5
 
 cor_p_a <- 0
+
+locf <- FALSE # last-one-carried-forward (locf, like Monolix) or next-observation-carried-backward (nocb, like NONMEM) 
 
 n_subjects_per_dose <- 25
 
@@ -40,7 +42,6 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
   rename_all(toupper) %>%
   select(ID, TIME, everything()) 
 
-
 dense_grid <- seq(0, 24*7, by = 0.5)
 
 sampling_times <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
@@ -48,6 +49,32 @@ realistic_times <- c(sampling_times, 72, 144, 144 + sampling_times)
 
 # times_to_simulate <- dense_grid
 times_to_simulate <- realistic_times
+
+# nonmem_data_simulate <- dosing_data %>% 
+#   group_by(ID) %>% 
+#   slice(rep(1, times = length(times_to_simulate))) %>% 
+#   mutate(AMT = 0,
+#          ADDL = 0,
+#          II = 0,
+#          CMT = 2,
+#          EVID = 0,
+#          RATE = 0,
+#          TIME = times_to_simulate) %>% 
+#   ungroup() %>%
+#   bind_rows(dosing_data) %>% 
+#   group_by(ID) %>% 
+#   mutate(SEXF = rbinom(1, 1, 0.5),
+#          AGE = sample(18:80, 1),
+#          RACE = sample(1:4, 1),
+#          CMPPI = if_else(TIME < 72, 0, 1),
+#          EGFR_baseline = runif(1, 15, 120),
+#          EGFR = if_else(TIME == 0, EGFR_baseline, rnorm(n(), EGFR_baseline, 2)),
+#          WT_baseline = rlnorm(1, log(70), 0.2),
+#          WT_beta = rnorm(1, 0, 0.004),
+#          WT = WT_baseline + WT_beta*TIME) %>% 
+#   ungroup() %>% 
+#   select(-WT_baseline, -WT_beta, -EGFR_baseline) %>% 
+#   arrange(ID, TIME, AMT) 
 
 nonmem_data_simulate <- dosing_data %>% 
   group_by(ID) %>% 
@@ -65,11 +92,24 @@ nonmem_data_simulate <- dosing_data %>%
   mutate(SEXF = rbinom(1, 1, 0.5),
          AGE = sample(18:80, 1),
          RACE = sample(1:4, 1),
-         WT = rlnorm(1, log(70), 0.15),
-         CMPPI = rbinom(1, 1, 0.3),
-         EGFR = runif(1, 15, 120)) %>% 
+         CMPPI = 0,
+         EGFR_baseline = 90,
+         EGFR = EGFR_baseline,
+         WT_baseline = 70,
+         WT_beta = rnorm(1, 0, 0),
+         WT = WT_baseline) %>% 
   ungroup() %>% 
-  arrange(ID, TIME, AMT)
+  select(-WT_baseline, -WT_beta, -EGFR_baseline) %>% 
+  arrange(ID, TIME, AMT) 
+
+if(isTRUE(locf)){
+  nonmem_data_simulate <- nonmem_data_simulate %>%
+    group_by(ID) %>%
+    mutate(WT = lag(WT, default = first(WT)),
+           EGFR = lag(EGFR, default = first(EGFR)),
+           CMPPI = lag(CMPPI, default = first(CMPPI))) %>%
+    ungroup()
+}
 
 n_subjects <- nonmem_data_simulate %>%  # number of individuals to simulate
   distinct(ID) %>% 
@@ -89,21 +129,12 @@ subj_start <- nonmem_data_simulate %>%
 subj_end <- c(subj_start[-1] - 1, n_total) 
 
 wt <- nonmem_data_simulate %>% 
-  group_by(ID) %>% 
-  distinct(WT) %>% 
-  ungroup() %>% 
   pull(WT)
 
 cmppi <- nonmem_data_simulate %>% 
-  group_by(ID) %>% 
-  distinct(CMPPI) %>% 
-  ungroup() %>% 
   pull(CMPPI)
 
 egfr <- nonmem_data_simulate %>% 
-  group_by(ID) %>% 
-  distinct(EGFR) %>% 
-  ungroup() %>% 
   pull(EGFR)
 
 stan_data <- list(n_subjects = n_subjects,
@@ -135,11 +166,16 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma_p = sigma_p,
                   sigma_a = sigma_a,
                   cor_p_a = cor_p_a,
-                  t_1 = 144,
-                  t_2 = 168)
+                  solver = 3,
+                  t_1 = 144, 
+                  t_2 = 168) # analytical = 1, mat exp = 2, rk45 = 3
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates/Stan/Simulate/depot_1cmt_ppa_with_cmax_tmax_auc_covariates.stan") 
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Simulate/depot_1cmt_ppa_linear_covariates_time_varying_generic.stan") 
+
+model <- cmdstan_model(
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Simulate/depot_1cmt_ppa_linear_covariates_time_varying_with_auc_tmax_cmax_generic.stan") 
+
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
@@ -149,16 +185,12 @@ simulated_data <- model$sample(data = stan_data,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA",
-                                     "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
-  spread_draws(CL[ID], VC[ID], KA[ID],
-               auc_t1_t2[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
-  inner_join(nonmem_data_simulate %>% 
-               distinct(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR),
-             by = "ID") %>% 
-  ungroup() %>%
-  select(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA, 
-         auc_t1_t2, c_max, t_max, t_half)
+params_ind <- nonmem_data_simulate %>%
+  mutate(i = row_number()) %>% 
+  inner_join(simulated_data$draws(c("CL", "VC", "KA")) %>%
+               spread_draws(c(CL, VC, KA)[i]) ,
+             by = "i") %>% 
+  select(ID, TIME, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -169,7 +201,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
   select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME, 
          SEXF, AGE, RACE, WT, CMPPI, EGFR,
          DV = "dv", IPRED = "ipred") %>% 
-  mutate(LLOQ = 1, 
+  mutate(LLOQ = 1,
          BLOQ = case_when(EVID == 1 ~ NA_real_,
                           DV <= LLOQ ~ 1,
                           DV > LLOQ ~ 0,
@@ -177,7 +209,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
          DV = if_else(EVID == 1 | BLOQ == 1, NA_real_, DV),
          MDV = if_else(is.na(DV), 1, 0)) %>% 
   relocate(DV, .after = last_col()) %>% 
-  relocate(TIME, .before = DV)
+  relocate(TIME, .before = DV) 
 
 (p_1 <- ggplot(data %>% 
                  group_by(ID) %>% 
@@ -207,7 +239,8 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
        geom_point() + 
        geom_smooth(method = "lm") +
        theme_bw())) /
-  ((params_ind %>% 
+  ((params_ind %>%
+      mutate(CMPPI = factor(CMPPI)) %>% 
       ggplot(aes(x = CMPPI, y = KA, group = CMPPI)) + 
       geom_boxplot() + 
       theme_bw()) +
@@ -219,13 +252,19 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
 
 data %>%
   select(-IPRED) %>% 
-  write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_prop_covariates.csv",
-            na = ".")
-  # write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_covariates.csv", 
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_nocb.csv",
   #           na = ".")
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_covariates_time_varying_generic_nocb.csv",
+  #         na = ".")
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_locf.csv",
+  #           na = ".")
+  write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_covariates_time_varying_generic_locf.csv",
+            na = ".")
 
 params_ind %>%
-  write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_prop_params_ind_covariates.csv")
-  # write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_params_ind_covariates.csv")
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_params_ind_covariates_time_varying_generic_nocb.csv")
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_params_ind_covariates_time_varying_generic_nocb.csv")
+  # write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_params_ind_covariates_time_varying_generic_locf.csv")
+  write_csv("depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_params_ind_covariates_time_varying_generic_locf.csv")
 
 

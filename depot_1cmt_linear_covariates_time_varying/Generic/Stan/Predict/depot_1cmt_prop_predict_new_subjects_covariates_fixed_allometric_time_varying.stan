@@ -1,20 +1,31 @@
 // First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model
 // IIV on CL, VC, and Ka (full covariance matrix)
-// exponential error - DV = IPRED*exp(eps)
+// proportional error - DV = IPRED*(1 + eps_p)
 // General ODE solution using Torsten to get out individual estimates of AUC, 
 //   Cmax, Tmax, ... is an option, but the user can choose to only calculate 
 //   IPRED and DV
+// Predictions are generated from a normal that is truncated below at 0
 // Covariates - this file is generic, so all can be time-varying or constant. 
 //   The key will be that the input for each covariate is length n_total and 
 //   not of length n_subjects (length = n_subjects implies that covariate is 
 //   constant): 
-//   1) Body Weight on CL and VC - (wt/70)^theta
+//   1) Body Weight on CL and VC - (wt/70)^theta - theta is fixed at a 
+//         user-chosen value (typically 0.75 and 1 for CL and VC, respectively)
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
 //      on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
 
 functions{
+  
+  real normal_lb_rng(real mu, real sigma, real lb){
+    
+    real p_lb = normal_cdf(lb | mu, sigma);
+    real u = uniform_rng(p_lb, 1);
+    real y = mu + sigma * inv_Phi(u);
+    return y;
+
+  }
   
   vector depot_1cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
@@ -46,6 +57,7 @@ functions{
 data{
   
   int n_subjects;
+  int n_subjects_new;
   int n_time_new;
   array[n_time_new] real time;
   array[n_time_new] real amt;
@@ -55,8 +67,8 @@ data{
   array[n_time_new] real ii;
   array[n_time_new] int addl;
   array[n_time_new] int ss;
-  array[n_subjects] int subj_start;
-  array[n_subjects] int subj_end;
+  array[n_subjects_new] int subj_start;
+  array[n_subjects_new] int subj_end;
   
   vector<lower = 0>[n_time_new] wt;                     // bodyweight (kg)
   vector<lower = 0, upper = 1>[n_time_new] cmppi;       // cmppi
@@ -64,7 +76,7 @@ data{
   
   real<lower = 0> t_1;   // Time at which to start SS calculations (AUC_ss, C_max_ss, ...)
   real<lower = t_1> t_2; // Time at which to end SS calculations (AUC_ss, C_max_ss, ...)
- 
+  
   int <lower = 0, upper = 0> want_auc_cmax; // 0 => only calculate concentrations
                                             // 1 => concentrations and auc, c_max, ...
                                             // For now, the c_max, t_max, and auc 
@@ -72,6 +84,9 @@ data{
                                             // with the time-varying parameters,
                                             // so this must be 0
                                             
+  real theta_cl_wt; // typically this will be 0.75, sometimes 0.85
+  real theta_vc_wt; // typically this will be 1
+ 
 }
 transformed data{ 
   
@@ -90,24 +105,22 @@ parameters{
   real<lower = 0> TVVC; 
   real<lower = TVCL/TVVC> TVKA;
   
-  real theta_cl_wt;
-  real theta_vc_wt;
   real theta_ka_cmppi;
   real theta_cl_egfr;
   
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma;
+  real<lower = 0> sigma_p;
   
   matrix[n_random, n_subjects] Z;
   
 }
 generated quantities{
   
-  vector[n_time_new] ipred;   // ipred for the observed individuals at the new timepoints
-  vector[n_time_new] pred;    // pred for the observed individuals at the new timepoints
-  vector[n_time_new] dv;      // dv for the observed individuals at the new timepoints
+  vector[n_time_new] ipred;       // ipred at the new timepoints (no residual error)
+  vector[n_time_new] pred;        // pred at the new timepoints
+  vector[n_time_new] dv;          // dv at the new timepoints (with residual error)
   vector[want_auc_cmax ? n_subjects : 0] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
   vector[want_auc_cmax ? n_subjects : 0] c_max;   // Cmax between t1 and t2 (c_max_ss)
   vector[want_auc_cmax ? n_subjects : 0] t_max;   // Tmax between t1 and t2, then subtract off t1
@@ -120,22 +133,22 @@ generated quantities{
   {
     row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVKA});
 
-    matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
-    matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
-
-    matrix[n_subjects, n_random] eta = diag_pre_multiply(omega, L * Z)';
-
-    matrix[n_subjects, n_random] theta =
-                          (rep_matrix(typical_values, n_subjects) .* exp(eta));
-
-    matrix[n_time_new, 2] x_pred;
+    matrix[n_subjects_new, n_random] eta_new;
+    matrix[n_subjects_new, n_random] theta_new;
     matrix[n_time_new, n_cmt] x_ipred;
+    matrix[n_time_new, 2] x_pred;
+
+    for(i in 1:n_subjects_new){
+      eta_new[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
+                                               diag_pre_multiply(omega, L))';
+    }
+    theta_new = (rep_matrix(typical_values, n_subjects_new) .* exp(eta_new));
     
     vector[n_time_new] cl_p;
     vector[n_time_new] vc_p;
     vector[n_time_new] ka_p;
 
-    for(j in 1:n_subjects){
+    for(j in 1:n_subjects_new){
       
       int n_total_subj = subj_end[j] - subj_start[j] + 1;
       vector[n_total_subj] wt_over_70 = wt[subj_start[j]:subj_end[j]] ./ 70;
@@ -149,7 +162,7 @@ generated quantities{
       array[n_total_subj, n_random] real params_to_input;
       array[n_total_subj, n_random] real params_to_input_p;
                       
-      row_vector[n_random] theta_j = theta[j]; // access the parameters for subject j
+      row_vector[n_random] theta_j = theta_new[j]; // access the parameters for subject j
       CL[subj_start[j]:subj_end[j]] = theta_j[1] .* wt_adjustment_cl .* egfr_adjustment_cl;
       VC[subj_start[j]:subj_end[j]] = theta_j[2] * wt_adjustment_vc;
       KA[subj_start[j]:subj_end[j]] = theta_j[3] * cmppi_adjustment_ka;
@@ -224,11 +237,10 @@ generated quantities{
       if(ipred[i] == 0){
         dv[i] = 0;
       }else{
-        dv[i] = lognormal_rng(log(ipred[i]), sigma);
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = ipred_tmp*sigma_p;
+        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
       }
     }
-  
   }
-
 }
-

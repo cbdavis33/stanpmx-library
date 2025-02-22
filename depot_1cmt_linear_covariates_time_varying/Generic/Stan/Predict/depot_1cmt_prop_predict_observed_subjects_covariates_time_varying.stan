@@ -3,7 +3,8 @@
 // IIV on CL, VC, and Ka (full covariance matrix)
 // proportional error - DV = IPRED*(1 + eps_p)
 // General ODE solution using Torsten to get out individual estimates of AUC, 
-//   Cmax, Tmax, ...
+//   Cmax, Tmax, ... is an option, but the user can choose to only calculate 
+//   IPRED and DV
 // Predictions are generated from a normal that is truncated below at 0
 // Covariates - this file is generic, so all can be time-varying or constant. 
 //   The key will be that the input for each covariate is length n_total and 
@@ -44,7 +45,7 @@ functions{
 
     dydt[1] = -ka*y[1];                            // depot
     dydt[2] = slope;                               // central
-    dydt[3] = t >= t_1 && t <= t_2 ? y[2] : 0;     // AUC_t_1-t_2
+    dydt[3] = t >= t_1 && t <= t_2 ? y[2]/vc : 0;  // AUC_t_1-t_2
     dydt[4] = x;                                   // C_max
     dydt[5] = z;                                   // t_max
     
@@ -73,12 +74,19 @@ data{
   
   real<lower = 0> t_1;   // Time at which to start SS calculations (AUC_ss, C_max_ss, ...)
   real<lower = t_1> t_2; // Time at which to end SS calculations (AUC_ss, C_max_ss, ...)
+  
+  int <lower = 0, upper = 0> want_auc_cmax; // 0 => only calculate concentrations
+                                            // 1 => concentrations and auc, c_max, ...
+                                            // For now, the c_max, t_max, and auc 
+                                            // calculations aren't working as expected
+                                            // with the time-varying parameters,
+                                            // so this must be 0
  
 }
 transformed data{ 
   
   int n_random = 3; // Number of random effects
-  int n_cmt = 5;    // Number of compartments (depot, central, AUC_ss, Cmax_ss, Tmax_ss)
+  int n_cmt = want_auc_cmax ? 5 : 2; // Number of compartments - depot, central (AUC_ss, Cmax_ss, Tmax_ss))
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt);
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
@@ -110,9 +118,9 @@ generated quantities{
   vector[n_time_new] ipred;   // ipred for the observed individuals at the new timepoints
   vector[n_time_new] pred;    // pred for the observed individuals at the new timepoints
   vector[n_time_new] dv;      // dv for the observed individuals at the new timepoints
-  // vector[n_subjects] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
-  vector[n_subjects] c_max;   // Cmax between t1 and t2 (c_max_ss)
-  vector[n_subjects] t_max;   // Tmax between t1 and t2, then subtract off t1
+  vector[want_auc_cmax ? n_subjects : 0] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
+  vector[want_auc_cmax ? n_subjects : 0] c_max;   // Cmax between t1 and t2 (c_max_ss)
+  vector[want_auc_cmax ? n_subjects : 0] t_max;   // Tmax between t1 and t2, then subtract off t1
   
   vector[n_time_new] CL;
   vector[n_time_new] VC;
@@ -168,18 +176,39 @@ generated quantities{
       params_to_input_p[, 2] = to_array_1d(vc_p[subj_start[j]:subj_end[j]]);
       params_to_input_p[, 3] = to_array_1d(ka_p[subj_start[j]:subj_end[j]]);
       
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(depot_1cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate[subj_start[j]:subj_end[j]],
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       params_to_input, bioav, tlag, x_r)';
+      if(want_auc_cmax == 1){
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(depot_1cmt_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         params_to_input, bioav, tlag, x_r)';
+                         
+        auc_ss[j] = max(x_ipred[subj_start[j]:subj_end[j], 3]);
+        c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]);
+        t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) - t_1;
+                         
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           params_to_input)';
+        
+      }
                       
       ipred[subj_start[j]:subj_end[j]] = 
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[subj_start[j]:subj_end[j]];
@@ -198,9 +227,6 @@ generated quantities{
       pred[subj_start[j]:subj_end[j]] = 
         x_pred[subj_start[j]:subj_end[j], 2] ./ vc_p[subj_start[j]:subj_end[j]];
         
-      // auc_ss[j] = max(x_ipred[subj_start[j]:subj_end[j], 3]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) - t_1;
     }
 
   

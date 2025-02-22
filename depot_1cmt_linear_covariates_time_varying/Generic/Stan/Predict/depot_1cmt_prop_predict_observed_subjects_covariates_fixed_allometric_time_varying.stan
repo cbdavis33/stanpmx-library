@@ -1,20 +1,31 @@
 // First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model
 // IIV on CL, VC, and Ka (full covariance matrix)
-// exponential error - DV = IPRED*exp(eps)
+// proportional error - DV = IPRED*(1 + eps_p)
 // General ODE solution using Torsten to get out individual estimates of AUC, 
 //   Cmax, Tmax, ... is an option, but the user can choose to only calculate 
 //   IPRED and DV
+// Predictions are generated from a normal that is truncated below at 0
 // Covariates - this file is generic, so all can be time-varying or constant. 
 //   The key will be that the input for each covariate is length n_total and 
 //   not of length n_subjects (length = n_subjects implies that covariate is 
 //   constant): 
-//   1) Body Weight on CL and VC - (wt/70)^theta
+//   1) Body Weight on CL and VC - (wt/70)^theta - theta is fixed at a 
+//         user-chosen value (typically 0.75 and 1 for CL and VC, respectively)
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
 //      on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
 
 functions{
+  
+  real normal_lb_rng(real mu, real sigma, real lb){
+    
+    real p_lb = normal_cdf(lb | mu, sigma);
+    real u = uniform_rng(p_lb, 1);
+    real y = mu + sigma * inv_Phi(u);
+    return y;
+
+  }
   
   vector depot_1cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
@@ -64,7 +75,7 @@ data{
   
   real<lower = 0> t_1;   // Time at which to start SS calculations (AUC_ss, C_max_ss, ...)
   real<lower = t_1> t_2; // Time at which to end SS calculations (AUC_ss, C_max_ss, ...)
- 
+  
   int <lower = 0, upper = 0> want_auc_cmax; // 0 => only calculate concentrations
                                             // 1 => concentrations and auc, c_max, ...
                                             // For now, the c_max, t_max, and auc 
@@ -72,6 +83,9 @@ data{
                                             // with the time-varying parameters,
                                             // so this must be 0
                                             
+  real theta_cl_wt; // typically this will be 0.75, sometimes 0.85
+  real theta_vc_wt; // typically this will be 1
+ 
 }
 transformed data{ 
   
@@ -90,15 +104,13 @@ parameters{
   real<lower = 0> TVVC; 
   real<lower = TVCL/TVVC> TVKA;
   
-  real theta_cl_wt;
-  real theta_vc_wt;
   real theta_ka_cmppi;
   real theta_cl_egfr;
   
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
   
-  real<lower = 0> sigma;
+  real<lower = 0> sigma_p;
   
   matrix[n_random, n_subjects] Z;
   
@@ -224,11 +236,10 @@ generated quantities{
       if(ipred[i] == 0){
         dv[i] = 0;
       }else{
-        dv[i] = lognormal_rng(log(ipred[i]), sigma);
+        real ipred_tmp = ipred[i];
+        real sigma_tmp = ipred_tmp*sigma_p;
+        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
       }
     }
-  
   }
-
 }
-

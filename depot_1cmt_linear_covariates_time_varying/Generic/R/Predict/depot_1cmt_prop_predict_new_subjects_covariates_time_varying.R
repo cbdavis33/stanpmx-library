@@ -35,7 +35,7 @@ nonmem_data <- read_csv(
 
 # For this example, let's simulate individuals with various covariates at 400 
 # mg. These covariates are constant, as if we can't predict how they change over 
-# time
+# time. You could give time-varying covariates if you wanted
 data_new_covariates <- expand_grid(wt = c(50, 70, 90), 
                                    cmppi = c(0, 1), 
                                    egfr = c(15, 30, 60, 90)) %>% 
@@ -57,7 +57,7 @@ t1 <- dosing_data %>%
   distinct() %>% 
   deframe()
 
-times_new <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 0.5)))))
+times_new <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 2)))))
 
 new_data <- bind_rows(replicate(max(dosing_data$ID), times_new, 
                                 simplify = FALSE)) %>% 
@@ -122,7 +122,8 @@ stan_data <- list(n_subjects = n_subjects,
                   cmppi = cmppi,
                   egfr = egfr,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_prop_predict_new_subjects_covariates_time_varying.stan")

@@ -11,10 +11,32 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_ppa_covariates.rds")
+locf <- FALSE
 
-nonmem_data <- read_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_covariates.csv",
-                        na = ".") %>% 
+file_path <- if_else(isTRUE(locf), 
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_locf.csv",
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_nocb.csv")
+
+
+fit <- if(isTRUE(locf)){
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_fixed_allometric_locf.rds")
+}else{
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_fixed_allometric_nocb.rds")
+}
+
+stan_data <- jsonlite::read_json(
+  str_c("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/Stan_Data/", 
+        "prop_fixed_allometric_nocb.json")) %>% 
+  map(function(x) if(is.list(x)) as_vector(x) else x)
+
+stan_data <- jsonlite::read_json(
+  str_c("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/Stan_Data/", 
+        "prop_fixed_allometric_", if_else(locf, "locf", "nocb"), ".json")) %>% 
+  map(function(x) if(is.list(x)) as_vector(x) else x)
+
+nonmem_data <- read_csv(
+  file_path,
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -44,21 +66,12 @@ subj_start <- new_data %>%
 subj_end <- c(subj_start[-1] - 1, n_time_new)  
 
 wt <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(wt) %>% 
-  ungroup() %>% 
   pull(wt)
 
 cmppi <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(cmppi) %>% 
-  ungroup() %>% 
   pull(cmppi)
 
 egfr <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(egfr) %>% 
-  ungroup() %>% 
   pull(egfr)
 
 stan_data <- list(n_subjects = n_subjects,
@@ -78,10 +91,13 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168,
                   wt = wt,
                   cmppi = cmppi,
-                  egfr = egfr)
+                  egfr = egfr,
+                  want_auc_cmax = 0,
+                  theta_cl_wt = stan_data$theta_cl_wt,
+                  theta_vc_wt = stan_data$theta_vc_wt)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates/Stan/Predict/depot_1cmt_ppa_predict_new_subjects_covariates.stan")
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_prop_predict_new_subjects_covariates_fixed_allometric_time_varying.stan")
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,

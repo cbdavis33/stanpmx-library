@@ -9,7 +9,7 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-locf <- TRUE
+locf <- FALSE
 
 file_path <- if_else(isTRUE(locf), 
                      "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_covariates_time_varying_generic_locf.csv",
@@ -117,7 +117,8 @@ stan_data <- list(n_subjects = n_subjects,
                   cmppi = cmppi,
                   egfr = egfr,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_ppa_predict_observed_subjects_covariates_time_varying.stan")
@@ -201,39 +202,40 @@ for(i in 1:ggforce::n_pages(tmp)){
   
 }
 
-## Individual estimates (posterior mean)
-
-est_ind <- preds_df %>%
-  spread_draws(c(auc_ss, c_max, t_max)[ID]) %>% 
-  mean_qi() %>% 
-  select(ID, auc_ss, c_max, t_max) %>% 
-  inner_join(post_preds_summary %>% 
-               filter(time == 168) %>% 
-               select(ID, c_trough = "ipred") %>% 
-               distinct(),
-             by = "ID")
-
-est_ind
-
-
-
-blah <- preds_df %>%
-  spread_draws(c(CL, VC, KA)[i]) %>% 
-  mean_qi() %>% 
-  select(i, CL, VC, KA)
-
-
-
-# est_ind <- preds_df %>%
-#   spread_draws(c(CL, VC, KA, 
-#                  auc_ss, c_max, t_max, t_half)[ID]) %>% 
-#   mean_qi() %>% 
-#   select(ID, CL, VC, KA, 
-#          auc_ss, c_max, t_max, t_half) %>% 
-#   inner_join(post_preds_summary %>% 
-#                filter(time == 168) %>% 
-#                select(ID, c_trough = "ipred") %>% 
-#                distinct(),
-#              by = "ID")
+## TODO: work from here down
+# ## Individual estimates (posterior mean)
 # 
-# est_ind
+# if(stan_data$want_cmax_auc){
+#   est_ind <- preds_df %>%
+#     spread_draws(c(auc_ss, c_max, t_max)[ID]) %>% 
+#     mean_qi() %>% 
+#     select(ID, auc_ss, c_max, t_max) %>% 
+#     inner_join(post_preds_summary %>% 
+#                  filter(time == 168) %>% 
+#                  select(ID, c_trough = "ipred") %>% 
+#                  distinct(),
+#                by = "ID")
+# }
+# 
+# 
+# 
+# est <- preds_df %>%
+#   spread_draws(c(CL, VC, KA)[i]) %>% 
+#   mean_qi() %>% 
+#   select(i, CL, VC, KA)
+# 
+# 
+# 
+# # est_ind <- preds_df %>%
+# #   spread_draws(c(CL, VC, KA, 
+# #                  auc_ss, c_max, t_max, t_half)[ID]) %>% 
+# #   mean_qi() %>% 
+# #   select(ID, CL, VC, KA, 
+# #          auc_ss, c_max, t_max, t_half) %>% 
+# #   inner_join(post_preds_summary %>% 
+# #                filter(time == 168) %>% 
+# #                select(ID, c_trough = "ipred") %>% 
+# #                distinct(),
+# #              by = "ID")
+# # 
+# # est_ind

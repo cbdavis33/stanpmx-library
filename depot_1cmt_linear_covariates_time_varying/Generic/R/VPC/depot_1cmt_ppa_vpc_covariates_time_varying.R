@@ -11,10 +11,22 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-fit <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_exp_covariates.rds")
+locf <- FALSE
 
-nonmem_data <- read_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_exp_covariates.csv",
-                        na = ".") %>% 
+file_path <- if_else(isTRUE(locf), 
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_covariates_time_varying_generic_locf.csv",
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_ppa_covariates_time_varying_generic_nocb.csv")
+
+
+fit <- if(isTRUE(locf)){
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/ppa_locf.rds")
+}else{
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/ppa_nocb.rds")
+}
+
+nonmem_data <- read_csv(
+  file_path,
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -44,21 +56,12 @@ subj_start <- new_data %>%
 subj_end <- c(subj_start[-1] - 1, n_time_new)  
 
 wt <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(wt) %>% 
-  ungroup() %>% 
   pull(wt)
 
 cmppi <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(cmppi) %>% 
-  ungroup() %>% 
   pull(cmppi)
 
 egfr <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(egfr) %>% 
-  ungroup() %>% 
   pull(egfr)
 
 stan_data <- list(n_subjects = n_subjects,
@@ -78,10 +81,12 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168,
                   wt = wt,
                   cmppi = cmppi,
-                  egfr = egfr)
+                  egfr = egfr,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates/Stan/Predict/depot_1cmt_exp_predict_new_subjects_covariates.stan")
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_ppa_predict_new_subjects_covariates_time_varying.stan")
+
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
@@ -177,26 +182,26 @@ p_vpc +
   p_pcvpc
 
 (p_vpc_cmppi <- vpc(sim = sim, obs = obs,
-              sim_cols = list(idv = "time",
-                              dv = "dv",
-                              id = "ID",
-                              pred = "pred",
-                              sim = "sim"),
-              obs_cols = list(dv = "dv",
-                              idv = "time",
-                              id = "ID",
-                              pred = "pred"),
-              show = list(obs_dv = TRUE, 
-                          obs_ci = TRUE,
-                          pi = TRUE,
-                          pi_as_area = FALSE,
-                          pi_ci = TRUE,
-                          obs_median = TRUE,
-                          sim_median = TRUE,
-                          sim_median_ci = TRUE),
-              log_y = TRUE,
-              stratify = "cmppi",
-              lloq = 1) +
+                    sim_cols = list(idv = "time",
+                                    dv = "dv",
+                                    id = "ID",
+                                    pred = "pred",
+                                    sim = "sim"),
+                    obs_cols = list(dv = "dv",
+                                    idv = "time",
+                                    id = "ID",
+                                    pred = "pred"),
+                    show = list(obs_dv = TRUE, 
+                                obs_ci = TRUE,
+                                pi = TRUE,
+                                pi_as_area = FALSE,
+                                pi_ci = TRUE,
+                                obs_median = TRUE,
+                                sim_median = TRUE,
+                                sim_median_ci = TRUE),
+                    log_y = TRUE,
+                    stratify = "cmppi",
+                    lloq = 1) +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "identity") +
     scale_x_continuous(name = "Time (h)",
@@ -205,26 +210,26 @@ p_vpc +
     theme_bw())
 
 (p_pcvpc_cmppi <- vpc(sim = sim, obs = obs,
-                sim_cols = list(idv = "time",
-                                dv = "dv",
-                                id = "ID",
-                                pred = "pred_mean",
-                                sim = "sim"),
-                obs_cols = list(dv = "dv",
-                                idv = "time",
-                                id = "ID",
-                                pred = "pred_mean"),
-                pred_corr = TRUE,
-                show = list(obs_dv = TRUE, 
-                            obs_ci = TRUE,
-                            pi = TRUE,
-                            pi_as_area = FALSE,
-                            pi_ci = TRUE,
-                            obs_median = TRUE,
-                            sim_median = TRUE,
-                            sim_median_ci = TRUE),
-                stratify = "cmppi",
-                log_y = TRUE) +
+                      sim_cols = list(idv = "time",
+                                      dv = "dv",
+                                      id = "ID",
+                                      pred = "pred_mean",
+                                      sim = "sim"),
+                      obs_cols = list(dv = "dv",
+                                      idv = "time",
+                                      id = "ID",
+                                      pred = "pred_mean"),
+                      pred_corr = TRUE,
+                      show = list(obs_dv = TRUE, 
+                                  obs_ci = TRUE,
+                                  pi = TRUE,
+                                  pi_as_area = FALSE,
+                                  pi_ci = TRUE,
+                                  obs_median = TRUE,
+                                  sim_median = TRUE,
+                                  sim_median_ci = TRUE),
+                      stratify = "cmppi",
+                      log_y = TRUE) +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "log10") +
     scale_x_continuous(name = "Time (h)",
@@ -234,3 +239,4 @@ p_vpc +
 
 p_vpc_cmppi + 
   p_pcvpc_cmppi
+

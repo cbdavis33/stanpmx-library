@@ -135,7 +135,7 @@ model <- cmdstan_model(
   cpp_options = list(stan_threads = TRUE))
 
 basename <- if_else(isTRUE(locf), "prop_fixed_allometric_locf", 
-                    "prop_fixed_allometric__nocb")
+                    "prop_fixed_allometric_nocb")
 
 fit <- model$sample(
   data = stan_data,

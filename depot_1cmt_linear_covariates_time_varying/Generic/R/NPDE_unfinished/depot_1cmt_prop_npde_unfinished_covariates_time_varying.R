@@ -5,16 +5,27 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
-library(npde)
+library(vpc)
 library(patchwork)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
+locf <- TRUE
 
-fit <- read_rds("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_exp_covariates.rds")
+file_path <- if_else(isTRUE(locf), 
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_locf.csv",
+                     "depot_1cmt_linear_covariates_time_varying/Generic/Data/depot_1cmt_prop_covariates_time_varying_generic_nocb.csv")
 
-nonmem_data <- read_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_exp_covariates.csv",
-                        na = ".") %>% 
+
+fit <- if(isTRUE(locf)){
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_locf.rds")
+}else{
+  read_rds("depot_1cmt_linear_covariates_time_varying/Generic/Stan/Fits/prop_nocb.rds")
+}
+
+nonmem_data <- read_csv(
+  file_path,
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -44,21 +55,12 @@ subj_start <- new_data %>%
 subj_end <- c(subj_start[-1] - 1, n_time_new)  
 
 wt <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(wt) %>% 
-  ungroup() %>% 
   pull(wt)
 
 cmppi <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(cmppi) %>% 
-  ungroup() %>% 
   pull(cmppi)
 
 egfr <- nonmem_data %>% 
-  group_by(ID) %>% 
-  distinct(egfr) %>% 
-  ungroup() %>% 
   pull(egfr)
 
 stan_data <- list(n_subjects = n_subjects,
@@ -78,15 +80,17 @@ stan_data <- list(n_subjects = n_subjects,
                   t_2 = 168,
                   wt = wt,
                   cmppi = cmppi,
-                  egfr = egfr)
+                  egfr = egfr,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_covariates/Stan/Predict/depot_1cmt_exp_predict_new_subjects_covariates.stan")
+  "depot_1cmt_linear_covariates_time_varying/Generic/Stan/Predict/depot_1cmt_prop_predict_new_subjects_covariates_time_varying.stan")
+
 
 preds <- model$generate_quantities(fit,
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 123456) 
+                                   seed = 1234) 
 
 preds_df <- preds$draws(format = "draws_df")
 
