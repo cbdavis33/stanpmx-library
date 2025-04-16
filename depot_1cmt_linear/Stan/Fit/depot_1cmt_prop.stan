@@ -11,14 +11,6 @@
 // For PPC, it generates values from a normal that is truncated below at 0
 
 functions{
-
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
   
   int num_between(int lb, int ub, array[] int y){
     
@@ -204,7 +196,7 @@ transformed data{
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_ka}; 
   
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+  array[n_subjects] int seq_subj = linspaced_int_array(n_subjects, 1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
@@ -350,6 +342,10 @@ generated quantities{
     
       row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
       
+      real cl_p = TVCL;
+      real vc_p = TVVC;
+      real ka_p = TVKA;
+      
       CL_new[j] = theta_j_new[1];
       VC_new[j] = theta_j_new[2];
       KA_new[j] = theta_j_new[3];
@@ -357,7 +353,7 @@ generated quantities{
     
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
       matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
       
       K[1, 1] = -KA[j];
       K[2, 1] = KA[j];
@@ -388,10 +384,10 @@ generated quantities{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          K_epred, bioav, tlag)';
-                           
-      K_tv[1, 1] = -TVKA;
-      K_tv[2, 1] = TVKA;
-      K_tv[2, 2] = -TVCL/TVVC;
+                         
+      K_p[1, 1] = -ka_p;
+      K_p[2, 1] = ka_p;
+      K_p[2, 2] = -cl_p/vc_p;
 
       x_pred[subj_start[j]:subj_end[j],] =
         pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -402,7 +398,7 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         K_tv, bioav, tlag)';
+                         K_p, bioav, tlag)';
       
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
@@ -411,7 +407,7 @@ generated quantities{
         x_epred[subj_start[j]:subj_end[j], 2] ./ VC_new[j];
       
       dv_pred[subj_start[j]:subj_end[j]] =
-        x_pred[subj_start[j]:subj_end[j], 2] ./ TVVC;
+        x_pred[subj_start[j]:subj_end[j], 2] ./ vc_p;
       
     }
 

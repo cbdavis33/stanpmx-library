@@ -108,7 +108,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_p = 0.5,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear/Stan/Fit/depot_1cmt_ppa_no_threading.stan")
@@ -117,7 +118,6 @@ fit <- model$sample(data = stan_data,
                     seed = 11235,
                     chains = 4,
                     parallel_chains = 4,
-                    # threads_per_chain = parallel::detectCores()/4,
                     iter_warmup = 500,
                     iter_sampling = 1000,
                     adapt_delta = 0.8,
@@ -127,7 +127,7 @@ fit <- model$sample(data = stan_data,
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
                                            omega = rlnorm(3, log(0.3), 0.3),
-                                           sigma_p = rlnorm(1, log(0.2), 0.3)))
+                                           sigma = rlnorm(2, log(0.4), 0.3)))
 
 fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_ppa_no_threading.rds")
 

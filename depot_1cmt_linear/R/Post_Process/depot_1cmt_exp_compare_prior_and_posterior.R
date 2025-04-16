@@ -30,7 +30,7 @@ priors <- model$sample(data = stan_data,
                                               TVVC = rlnorm(1, log(8), 0.3),
                                               TVKA = rlnorm(1, log(0.8), 0.3),
                                               omega = rlnorm(3, log(0.3), 0.3),
-                                              sigma_p = rlnorm(1, log(0.2), 0.3)))
+                                              sigma = rlnorm(1, log(0.2), 0.3)))
 
 fit <- read_rds("depot_1cmt_linear/Stan/Fits/depot_1cmt_exp.rds")
 
@@ -116,4 +116,5 @@ target_comparison_tv /
   target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom") 
+  theme(legend.position = "bottom")  
+

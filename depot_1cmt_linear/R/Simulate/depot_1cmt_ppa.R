@@ -21,18 +21,25 @@ R <- diag(rep(1, times = 3))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0.5
+sigma_a <- 0 # 0.5
 
 cor_p_a <- 0
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 8
 
-dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
-                         cmt = 1, amt = c(50, 100, 200), ss = 0, tinf = 0, 
+dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
+                         cmt = 1, amt = c(50, 100, 200), ss = 0, tinf = 0,
                          evid = 1) %>%
-  as_tibble() %>% 
+  as_tibble() %>%
   rename_all(toupper) %>%
-  select(ID, TIME, everything()) 
+  select(ID, TIME, everything())
+
+# dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
+#                          cmt = 1, amt = c(200, 400, 800), ss = 0, tinf = 0, 
+#                          evid = 1) %>%
+#   as_tibble() %>% 
+#   rename_all(toupper) %>%
+#   select(ID, TIME, everything()) 
 
 
 dense_grid <- seq(0, 24*7, by = 0.5)
@@ -102,7 +109,7 @@ model <- cmdstan_model("depot_1cmt_linear/Stan/Simulate/depot_1cmt_ppa.stan")
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 11235,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
@@ -153,9 +160,11 @@ p_1 +
 
 data %>%
   select(-IPRED) %>% 
-  write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa.csv", na = ".")
+  # write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa.csv", na = ".")
+  write_csv("depot_1cmt_linear/Data/depot_1cmt_prop.csv", na = ".")
 
 params_ind %>%
-  write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa_params_ind.csv")
+  # write_csv("depot_1cmt_linear/Data/depot_1cmt_ppa_params_ind.csv")
+  write_csv("depot_1cmt_linear/Data/depot_1cmt_prop_params_ind.csv")
 
 

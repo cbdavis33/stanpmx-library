@@ -106,7 +106,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear/Stan/Fit/depot_1cmt_exp_no_threading.stan")

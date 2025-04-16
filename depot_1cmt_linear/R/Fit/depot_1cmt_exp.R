@@ -133,5 +133,5 @@ fit <- model$sample(data = stan_data,
 fit$save_object("depot_1cmt_linear/Stan/Fits/depot_1cmt_exp.rds")
 
 fit$save_data_file(dir = "depot_1cmt_linear/Stan/Fits/Stan_Data",
-                   basename = "exp", timestamp = FALSE, random = FALSE)
+                   basename = "exp", timestamp = FALSE, random = FALSE) 
 

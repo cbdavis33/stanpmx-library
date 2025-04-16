@@ -119,4 +119,4 @@ target_comparison_tv /
   target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 

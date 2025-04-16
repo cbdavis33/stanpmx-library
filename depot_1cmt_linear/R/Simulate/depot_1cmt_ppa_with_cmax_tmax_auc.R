@@ -25,7 +25,7 @@ sigma_a <- 0.5
 
 cor_p_a <- 0
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 8
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
                          cmt = 1, amt = c(50, 100, 200), ss = 0, tinf = 0, 
