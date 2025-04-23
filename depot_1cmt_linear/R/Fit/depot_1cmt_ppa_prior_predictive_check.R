@@ -1,7 +1,8 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(bayesplot)
+library(vpc)
 library(cmdstanr)
 library(tidyverse)
 
@@ -47,10 +48,6 @@ nonmem_data %>%
 # 
 # p1 +
 #   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%

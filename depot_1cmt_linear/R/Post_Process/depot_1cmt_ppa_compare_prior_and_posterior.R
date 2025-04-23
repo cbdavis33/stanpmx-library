@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
