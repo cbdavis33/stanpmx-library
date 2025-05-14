@@ -106,7 +106,8 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_ka = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model(
   "depot_1cmt_linear/Stan/Fit/depot_1cmt_prop_no_threading.stan")
@@ -115,7 +116,6 @@ fit <- model$sample(data = stan_data,
                     seed = 11235,
                     chains = 4,
                     parallel_chains = 4,
-                    threads_per_chain = parallel::detectCores()/4,
                     iter_warmup = 500,
                     iter_sampling = 1000,
                     adapt_delta = 0.8,

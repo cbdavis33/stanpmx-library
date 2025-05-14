@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -121,4 +121,4 @@ target_comparison_tv /
   target_comparison_error +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 

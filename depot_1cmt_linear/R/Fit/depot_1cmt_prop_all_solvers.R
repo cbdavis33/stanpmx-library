@@ -107,6 +107,7 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
+                  no_gq_predictions = 0,
                   solver = 1)
 
 model <- cmdstan_model(
