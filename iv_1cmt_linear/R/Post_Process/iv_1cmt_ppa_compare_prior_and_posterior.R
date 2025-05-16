@@ -1,6 +1,7 @@
 rm(list = ls())
 cat("\014")
 
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -25,8 +26,8 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                              TVVC = rlnorm(1, log(3), 0.3),
+                       init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                              TVVC = rlnorm(1, log(8), 0.3),
                                               omega = rlnorm(2, log(0.3), 0.3),
                                               sigma = rlnorm(2, log(0.4), 0.3)))
 
@@ -74,11 +75,10 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_cor <- draws_all_df %>% 
-    filter(variable %in% c("cor_cl_vc")) %>% 
+    filter(str_detect(variable, "cor_")) %>% 
     mutate(variable = factor(variable, 
                              levels = c("cor_cl_vc")),
-           variable = fct_recode(variable, 
-                                 "rho[paste(CL, ', ', VC)]" = "cor_cl_vc")) %>% 
+           variable = fct_recode(variable, "rho[paste(CL, ', ', VC)]" = "cor_cl_vc")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -107,8 +107,8 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 layout <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
-  area(t = 3, l = 3, b = 3.5, r = 4),
-  area(t = 4, l = 1, b = 4.5, r = 6)
+  area(t = 3, l = 1, b = 3.5, r = 6),
+  area(t = 4, l = 3, b = 4.5, r = 4)
 )
 
 target_comparison_tv /
@@ -117,5 +117,4 @@ target_comparison_tv /
   target_comparison_error +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
-
+  theme(legend.position = "bottom") 

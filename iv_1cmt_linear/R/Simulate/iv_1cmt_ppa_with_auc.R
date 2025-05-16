@@ -19,7 +19,7 @@ R <- diag(rep(1, times = 2))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0.5
+sigma_a <- 0 # 0.5
 
 cor_p_a <- 0
 
@@ -158,11 +158,11 @@ p_1 +
 
 data %>%
   select(-IPRED) %>%
-  # write_csv("iv_1cmt_linear/Data/iv_1cmt_prop.csv", na = ".")
-  write_csv("iv_1cmt_linear/Data/iv_1cmt_ppa.csv", na = ".")
+  write_csv("iv_1cmt_linear/Data/iv_1cmt_prop.csv", na = ".")
+  # write_csv("iv_1cmt_linear/Data/iv_1cmt_ppa.csv", na = ".")
 
 params_ind %>%
-  # write_csv("iv_1cmt_linear/Data/iv_1cmt_prop_params_ind.csv")
-  write_csv("iv_1cmt_linear/Data/iv_1cmt_ppa_params_ind.csv")
+  write_csv("iv_1cmt_linear/Data/iv_1cmt_prop_params_ind.csv")
+  # write_csv("iv_1cmt_linear/Data/iv_1cmt_ppa_params_ind.csv")
 
 
