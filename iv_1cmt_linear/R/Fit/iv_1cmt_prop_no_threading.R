@@ -33,24 +33,25 @@ nonmem_data %>%
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     scale_color_discrete(name = "Dose (mg)") +
-    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+    scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                        limits = c(NA, NA),
-                       trans = "log10") + 
+                       trans = "identity") +
     scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, max(nonmem_data$time), by = 14),
-                       labels = seq(0, max(nonmem_data$time), by = 14),
-                       limits = c(0, max(nonmem_data$time))) +
+                       breaks = seq(0, 216, by = 24),
+                       labels = seq(0, 216/24, by = 24/24),
+                       limits = c(0, NA)) +
     theme_bw(18) +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           axis.line = element_line(linewidth = 2),
           legend.position = "bottom"))
 
-p1 +
-  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
+# p1 +
+#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
-p1 +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p1 +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -95,17 +96,19 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 0.25,
-                  location_tvvc = 3,
+                  location_tvcl = 0.5,
+                  location_tvvc = 4,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0) 
 
-model <- cmdstan_model("iv_1cmt_linear/Stan/Fit/iv_1cmt_prop_no_threading.stan")
+model <- cmdstan_model(
+  "iv_1cmt_linear/Stan/Fit/iv_1cmt_prop_no_threading.stan")
 
 fit <- model$sample(data = stan_data,
                     seed = 11235,
@@ -116,8 +119,8 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                           TVVC = rlnorm(1, log(3), 0.3),
+                    init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                                           TVVC = rlnorm(1, log(4), 0.3),
                                            omega = rlnorm(2, log(0.3), 0.3),
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 

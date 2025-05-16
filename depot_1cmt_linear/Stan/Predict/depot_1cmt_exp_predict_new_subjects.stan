@@ -4,7 +4,7 @@
 // exponential error - DV = IPRED*exp(eps)
 // User's choice of analytical solution or general ODE solution
 // General ODE solution using Torsten will get out individual estimates of AUC, 
-//   Cmax, Tmax, ... Analtyical will not
+//   Cmax, Tmax, ... Analytical will not
 
 functions{
   
@@ -111,13 +111,15 @@ generated quantities{
                                                diag_pre_multiply(omega, L))';
     }
     theta_new = (rep_matrix(typical_values, n_subjects_new) .* exp(eta_new));
-    
-    CL = col(theta_new, 1);
-    VC = col(theta_new, 2);
-    KA = col(theta_new, 3);
-    KE = CL ./ VC;
 
     for(j in 1:n_subjects_new){
+      
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
+      
+      CL[j] = theta_j_new[1];
+      VC[j] = theta_j_new[2];
+      KA[j] = theta_j_new[3];
+      KE[j] = CL[j]/VC[j];
       
       if(want_auc_cmax == 1){
         

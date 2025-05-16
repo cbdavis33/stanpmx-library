@@ -1,6 +1,7 @@
 rm(list = ls())
 cat("\014")
 
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -13,7 +14,7 @@ stan_data <- jsonlite::read_json(
 stan_data$prior_only <- stan_data$no_gq_predictions <- 1
 
 model <- cmdstan_model("iv_1cmt_linear/Stan/Fit/iv_1cmt_prop.stan",
-                       cpp_options = list(stan_threads = TRUE))
+  cpp_options = list(stan_threads = TRUE))
 
 priors <- model$sample(data = stan_data,
                        seed = 235813,
@@ -25,13 +26,13 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                              TVVC = rlnorm(1, log(3), 0.3),
+                       init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                              TVVC = rlnorm(1, log(8), 0.3),
                                               omega = rlnorm(2, log(0.3), 0.3),
                                               sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-
 fit <- read_rds("iv_1cmt_linear/Stan/Fits/iv_1cmt_prop.rds")
+
 draws_df <- fit$draws(format = "draws_df")
 
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
@@ -77,8 +78,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     filter(str_detect(variable, "cor_")) %>% 
     mutate(variable = factor(variable, 
                              levels = c("cor_cl_vc")),
-           variable = fct_recode(variable, 
-                                 "rho[paste(CL, ', ', VC)]" = "cor_cl_vc")) %>% 
+           variable = fct_recode(variable, "rho[paste(CL, ', ', VC)]" = "cor_cl_vc")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -105,7 +105,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 layout <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
-  area(t = 3, l = 3, b = 3.5, r = 4),
+  area(t = 3, l = 1, b = 3.5, r = 6),
   area(t = 4, l = 3, b = 4.5, r = 4)
 )
 
@@ -115,5 +115,4 @@ target_comparison_tv /
   target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
-  
+  theme(legend.position = "bottom") 

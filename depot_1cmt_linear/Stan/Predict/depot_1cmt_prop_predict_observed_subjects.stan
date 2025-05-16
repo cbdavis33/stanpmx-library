@@ -4,7 +4,7 @@
 // proportional error - DV = IPRED*(1 + eps_p)
 // User's choice of analytical solution or general ODE solution
 // General ODE solution using Torsten will get out individual estimates of AUC, 
-//   Cmax, Tmax, ... Analtyical will not
+//   Cmax, Tmax, ... Analytical will not
 // Predictions are generated from a normal that is truncated below at 0
 
 functions{
@@ -128,20 +128,31 @@ generated quantities{
     }
     theta_new = (rep_matrix(typical_values, n_subjects) .* exp(eta_new));
     
-    vector[n_subjects] CL_new = col(theta_new, 1);
-    vector[n_subjects] VC_new = col(theta_new, 2);
-    vector[n_subjects] KA_new = col(theta_new, 3);
+    vector[n_subjects] CL_new;
+    vector[n_subjects] VC_new;
+    vector[n_subjects] KA_new;
 
     matrix[n_time_new, 2] x_pred;
     matrix[n_time_new, 2] x_epred;
     matrix[n_time_new, n_cmt] x_ipred;
     
-    CL = col(theta, 1);
-    VC = col(theta, 2);
-    KA = col(theta, 3);
-    KE = CL ./ VC;
-    
     for(j in 1:n_subjects){
+      
+      row_vector[n_random] theta_j = theta[j]; // access the parameters for subject j
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
+      
+      real cl_p = TVCL;
+      real vc_p = TVVC;
+      real ka_p = TVKA;
+      
+      CL[j] = theta_j[1];
+      VC[j] = theta_j[2];
+      KA[j] = theta_j[3];
+      KE[j] = CL[j]/VC[j];
+      
+      CL_new[j] = theta_j_new[1];
+      VC_new[j] = theta_j_new[2];
+      KA_new[j] = theta_j_new[3];
       
       x_pred[subj_start[j]:subj_end[j],] =
         pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
@@ -152,10 +163,10 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVKA})';
+                         {cl_p, vc_p, ka_p})';
 
       pred[subj_start[j]:subj_end[j]] = 
-        x_pred[subj_start[j]:subj_end[j], 2] ./ TVVC;
+        x_pred[subj_start[j]:subj_end[j], 2] ./ vc_p;
       
       x_epred[subj_start[j]:subj_end[j],] =
         pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],

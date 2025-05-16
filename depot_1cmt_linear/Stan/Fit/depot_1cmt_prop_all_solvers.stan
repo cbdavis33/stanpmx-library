@@ -11,14 +11,6 @@
 // For PPC, it generates values from a normal that is truncated below at 0
 
 functions{
-
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
   
   int num_between(int lb, int ub, array[] int y){
     
@@ -269,7 +261,7 @@ transformed data{
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_ka}; 
   
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+  array[n_subjects] int seq_subj = linspaced_int_array(n_subjects, 1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
