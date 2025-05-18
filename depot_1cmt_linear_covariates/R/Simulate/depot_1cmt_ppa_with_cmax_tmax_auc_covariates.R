@@ -19,6 +19,10 @@ theta_vc_wt <- 1
 theta_ka_cmppi <- -0.8
 theta_cl_egfr <- 0.5
 
+theta_vc_race2 <- 0
+theta_vc_race3 <- -0.3
+theta_vc_race4 <- 0.25
+
 omega_cl <- 0.3
 omega_vc <- 0.3
 omega_ka <- 0.3
@@ -31,7 +35,7 @@ sigma_a <- 0
 
 cor_p_a <- 0
 
-n_subjects_per_dose <- 25
+n_subjects_per_dose <- 40
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
                          cmt = 1, amt = c(50, 100, 200, 400), ss = 0, tinf = 0, 
@@ -106,6 +110,14 @@ egfr <- nonmem_data_simulate %>%
   ungroup() %>% 
   pull(EGFR)
 
+race <- nonmem_data_simulate %>% 
+  group_by(ID) %>% 
+  distinct(RACE) %>% 
+  ungroup() %>% 
+  pull(RACE)
+
+n_races <- length(unique(race))
+
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
                   time = nonmem_data_simulate$TIME,
@@ -121,6 +133,8 @@ stan_data <- list(n_subjects = n_subjects,
                   wt = wt,
                   cmppi = cmppi,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   TVCL = TVCL,
                   TVVC = TVVC,
                   TVKA = TVKA,
@@ -131,34 +145,38 @@ stan_data <- list(n_subjects = n_subjects,
                   theta_vc_wt = theta_vc_wt,
                   theta_ka_cmppi = theta_ka_cmppi,
                   theta_cl_egfr = theta_cl_egfr,
+                  theta_vc_race2 = theta_vc_race2,
+                  theta_vc_race3 = theta_vc_race3,
+                  theta_vc_race4 = theta_vc_race4,
                   R = R,
                   sigma_p = sigma_p,
                   sigma_a = sigma_a,
                   cor_p_a = cor_p_a,
-                  t_1 = 144,
-                  t_2 = 168)
+                  t_1 = 140,
+                  t_2 = 168) 
 
 model <- cmdstan_model(
   "depot_1cmt_linear_covariates/Stan/Simulate/depot_1cmt_ppa_with_cmax_tmax_auc_covariates.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 11235,
+                               seed = 2468,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA",
-                                     "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
-  spread_draws(CL[ID], VC[ID], KA[ID],
-               auc_t1_t2[ID], c_max[ID], t_max[ID], t_half[ID]) %>% 
+params_ind <- simulated_data$draws(c("CL", "VC", "KA", 
+                                     "auc_t1_t2", "c_max", "t_max", 
+                                     "t_half")) %>% 
+  spread_draws(c(CL, VC, KA, 
+                 auc_t1_t2, c_max, t_max, t_half)[ID]) %>% 
   inner_join(nonmem_data_simulate %>% 
                distinct(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR),
              by = "ID") %>% 
   ungroup() %>%
-  select(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA, 
-         auc_t1_t2, c_max, t_max, t_half)
+  select(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA) %>% 
+  mutate(across(c(SEXF, RACE, CMPPI), as.factor))
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -215,17 +233,40 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
         ggplot(aes(x = EGFR, y = CL)) + 
         geom_point() + 
         geom_smooth(method = "lm") +
+        theme_bw())) /
+  (params_ind %>% 
+     ggplot(aes(x = RACE, y = VC, group = RACE)) + 
+     geom_boxplot() + 
+     theme_bw())
+
+((params_ind %>% 
+    ggplot(aes(x = AGE, y = CL)) + 
+    geom_point() + 
+    geom_smooth(method = "lm") +
+    theme_bw()) |
+    (params_ind %>% 
+       ggplot(aes(x = AGE, y = VC)) + 
+       geom_point() + 
+       geom_smooth(method = "lm") +
+       theme_bw())) /
+  ((params_ind %>% 
+      ggplot(aes(x = SEXF, y = CL, group = SEXF)) + 
+      geom_boxplot() + 
+      theme_bw()) +
+     (params_ind %>% 
+        ggplot(aes(x = RACE, y = CL, group = RACE)) + 
+        geom_boxplot() + 
         theme_bw()))
 
 data %>%
   select(-IPRED) %>% 
   write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_prop_covariates.csv",
             na = ".")
-  # write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_covariates.csv", 
-  #           na = ".")
+# write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_covariates.csv", 
+#           na = ".")
 
 params_ind %>%
   write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_prop_params_ind_covariates.csv")
-  # write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_params_ind_covariates.csv")
+# write_csv("depot_1cmt_linear_covariates/Data/depot_1cmt_ppa_params_ind_covariates.csv")
 
 

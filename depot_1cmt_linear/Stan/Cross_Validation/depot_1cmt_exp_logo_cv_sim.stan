@@ -93,9 +93,27 @@ generated quantities{
         real CL_new = theta_new[1]; // * weight_adjustment_cl;
         real VC_new = theta_new[2]; // * weight_adjustment_vc;
         real KA_new = theta_new[3];
+        real KE_new = CL_new/VC_new;
         
-        x_epred[subj_start[j]:subj_end[j],] =
-          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+        // x_epred[subj_start[j]:subj_end[j],] =
+        //   pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+        //                    amt[subj_start[j]:subj_end[j]],
+        //                    rate[subj_start[j]:subj_end[j]],
+        //                    ii[subj_start[j]:subj_end[j]],
+        //                    evid[subj_start[j]:subj_end[j]],
+        //                    cmt[subj_start[j]:subj_end[j]],
+        //                    addl[subj_start[j]:subj_end[j]],
+        //                    ss[subj_start[j]:subj_end[j]],
+        //                    {CL_new, VC_new, KA_new})';
+                           
+        matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
+        
+        K_epred[1, 1] = -KA_new;
+        K_epred[2, 1] = KA_new;
+        K_epred[2, 2] = -KE_new;
+      
+        x_epred[subj_start[j]:subj_end[j], ] =
+          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
                            amt[subj_start[j]:subj_end[j]],
                            rate[subj_start[j]:subj_end[j]],
                            ii[subj_start[j]:subj_end[j]],
@@ -103,7 +121,7 @@ generated quantities{
                            cmt[subj_start[j]:subj_end[j]],
                            addl[subj_start[j]:subj_end[j]],
                            ss[subj_start[j]:subj_end[j]],
-                           {CL_new, VC_new, KA_new})';
+                           K_epred, bioav, tlag)';
                            
         dv_epred[subj_start[j]:subj_end[j]] = 
           x_epred[subj_start[j]:subj_end[j], 2] ./ VC_new;

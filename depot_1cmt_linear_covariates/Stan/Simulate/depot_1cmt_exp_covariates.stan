@@ -1,6 +1,6 @@
 // First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model
-// IIV on CL, VC, KA (full covariance matrix)
+// IIV on CL, VC, KA
 // exponential error - DV = IPRED*exp(eps)
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
 // Covariates: 
@@ -8,6 +8,7 @@
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
 //      on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
+//   4) Race on VC - exp(theta_vc_{race}*I(race == {race}))
 
 functions{
   
@@ -45,9 +46,11 @@ data{
   array[n_subjects] int subj_start;
   array[n_subjects] int subj_end;
   
-  array[n_subjects] real<lower = 0> wt;              // baseline bodyweight (kg)
-  array[n_subjects] int<lower = 0, upper = 1> cmppi; // cmppi
-  array[n_subjects] real<lower = 0> egfr;            // eGFR
+  array[n_subjects] real<lower = 0> wt;                    // baseline bodyweight (kg)
+  array[n_subjects] int<lower = 0, upper = 1> cmppi;       // cmppi
+  array[n_subjects] real<lower = 0> egfr;                  // eGFR
+  int<lower = 2> n_races;                                  // number of unique races
+  array[n_subjects] int<lower = 1, upper = n_races> race;  // race
   
   real<lower = 0> TVCL;
   real<lower = 0> TVVC;
@@ -61,6 +64,9 @@ data{
   real theta_vc_wt;    // allometric scaling coefficient for wt on VC
   real theta_ka_cmppi; // effect of CMPPI on KA 
   real theta_cl_egfr;  // effect of eGFR on clearance
+  real theta_vc_race2; // effect of race == 2 relative to race == 1 on VC
+  real theta_vc_race3; // effect of race == 3 relative to race == 1 on VC
+  real theta_vc_race4; // effect of race == 4 relative to race == 1 on VC
   
   corr_matrix[3] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
@@ -77,7 +83,10 @@ transformed data{
   
   int n_random = 3;
   int n_cmt = 2;
-
+  
+  vector[n_races] theta_vc_race = [0, theta_vc_race2, theta_vc_race3, 
+                                   theta_vc_race4]'; 
+                                          
   vector[n_random] omega = [omega_cl, omega_vc, omega_ka]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
@@ -120,12 +129,13 @@ generated quantities{
       real wt_adjustment_vc = wt_over_70^theta_vc_wt;
       real cmppi_adjustment_ka = exp(theta_ka_cmppi*cmppi[j]);
       real egfr_adjustment_cl = (egfr[j]/90)^theta_cl_egfr;
+      real race_adjustment_vc = exp(theta_vc_race[race[j]]);
       
       row_vector[n_random] theta_j = theta[j]; // access the parameters for subject j
       CL[j] = theta_j[1] * wt_adjustment_cl * egfr_adjustment_cl;
-      VC[j] = theta_j[2] * wt_adjustment_vc;
+      VC[j] = theta_j[2] * wt_adjustment_vc * race_adjustment_vc;
       KA[j] = theta_j[3] * cmppi_adjustment_ka;
- 
+      
       if(solver == 1){
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],

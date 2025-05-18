@@ -12,16 +12,9 @@
 //   2) Concomitant administration of protein pump inhibitors (CMPPI) 
 //      on KA (0/1) - exp(theta*cmppi)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
+//   4) Race on VC - exp(theta_vc_{race}*I(race == {race}))
 
 functions{
-
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
   
   int num_between(int lb, int ub, array[] int y){
     
@@ -95,6 +88,7 @@ functions{
     for(n in 1:N){            // loop over subjects in this slice
     
       int j = n + start - 1; // j is the ID of the current subject
+      
 
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
       K[1, 1] = -KA[j];
@@ -111,7 +105,7 @@ functions{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          K, bioav, tlag)';
-
+                           
       dv_ipred[subj_start[j]:subj_end[j]] = 
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
     
@@ -125,7 +119,7 @@ functions{
       }else{
         ptarget += lognormal_lpdf(dv_obs_slice[i] | log(ipred_slice[i]), sigma);
       }
-    }                                         
+    }                                    
                               
     return ptarget;
                            
@@ -153,9 +147,11 @@ data{
   vector[n_total] lloq;
   array[n_total] int bloq;
   
-  array[n_subjects] real<lower = 0> wt;              // baseline bodyweight (kg)
-  array[n_subjects] int<lower = 0, upper = 1> cmppi; // cmppi
-  array[n_subjects] real<lower = 0> egfr;            // eGFR
+  array[n_subjects] real<lower = 0> wt;                    // baseline bodyweight (kg)
+  array[n_subjects] int<lower = 0, upper = 1> cmppi;       // cmppi
+  array[n_subjects] real<lower = 0> egfr;                  // eGFR
+  int<lower = 2> n_races;                                  // number of unique races
+  array[n_subjects] int<lower = 1, upper = n_races> race;  // race
   
   real<lower = 0> location_tvcl;  // Prior Location parameter for CL
   real<lower = 0> location_tvvc;  // Prior Location parameter for VC
@@ -171,7 +167,7 @@ data{
   
   real<lower = 0> lkj_df_omega;   // Prior degrees of freedom for omega cor mat
   
-  real<lower = 0> scale_sigma;  // Prior Scale parameter for exponential error
+  real<lower = 0> scale_sigma;    // Prior Scale parameter for exponential error
   
   int<lower = 0, upper = 1> prior_only; // Want to simulate from the prior?
   int<lower = 0, upper = prior_only> no_gq_predictions; // Leave out PREDS and IPREDS in 
@@ -196,7 +192,7 @@ transformed data{
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_ka}; 
   
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+  array[n_subjects] int seq_subj = linspaced_int_array(n_subjects, 1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
@@ -212,6 +208,9 @@ parameters{
   real theta_vc_wt;
   real theta_ka_cmppi;
   real theta_cl_egfr;
+  real theta_vc_race2;
+  real theta_vc_race3;
+  real theta_vc_race4;
   
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
@@ -239,6 +238,9 @@ transformed parameters{
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
+                          
+    vector[n_races] theta_vc_race = [0, theta_vc_race2, theta_vc_race3, 
+                                     theta_vc_race4]';
     
     eta_cl = col(eta, 1);
     eta_vc = col(eta, 2);
@@ -251,12 +253,14 @@ transformed parameters{
       real wt_adjustment_vc = wt_over_70^theta_vc_wt;
       real cmppi_adjustment_ka = exp(theta_ka_cmppi*cmppi[j]);
       real egfr_adjustment_cl = (egfr[j]/90)^theta_cl_egfr;
+      real race_adjustment_vc = exp(theta_vc_race[race[j]]);
       
       row_vector[n_random] theta_j = theta[j]; // access the parameters for subject j
       CL[j] = theta_j[1] * wt_adjustment_cl * egfr_adjustment_cl;
-      VC[j] = theta_j[2] * wt_adjustment_vc;
+      VC[j] = theta_j[2] * wt_adjustment_vc * race_adjustment_vc;
       KA[j] = theta_j[3] * cmppi_adjustment_ka;
-      KE[j] = CL[j]/VC[j];  
+      KE[j] = CL[j]/VC[j];
+      
     }
   
   }
@@ -273,6 +277,9 @@ model{
   theta_vc_wt ~ std_normal();
   theta_ka_cmppi ~ std_normal();
   theta_cl_egfr ~ std_normal();
+  theta_vc_race2 ~ std_normal();
+  theta_vc_race3 ~ std_normal();
+  theta_vc_race4 ~ std_normal();
 
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);
@@ -313,17 +320,16 @@ generated quantities{
   real omega_cl_ka;
   real omega_vc_ka;
 
-  vector[n_obs] ipred;
-  vector[n_obs] pred;
-  vector[n_obs] dv_ppc;
-  vector[n_obs] log_lik;
-  vector[n_obs] res;
-  vector[n_obs] wres;
-  vector[n_obs] ires;
-  vector[n_obs] iwres;
+  vector[no_gq_predictions ? 0 : n_obs] pred;
+  vector[no_gq_predictions ? 0 : n_obs] epred_stan;
+  vector[no_gq_predictions ? 0 : n_obs] ipred;
+  vector[no_gq_predictions ? 0 : n_obs] epred;
+  vector[no_gq_predictions ? 0 : n_obs] dv_ppc;
+  vector[no_gq_predictions ? 0 : n_obs] log_lik;
+  vector[no_gq_predictions ? 0 : n_obs] iwres;
  
   {
-
+    
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
 
@@ -336,31 +342,59 @@ generated quantities{
     omega_vc_ka = Omega[2, 3];
     
   }
-
+  
   if(no_gq_predictions == 0){
+    
+    vector[n_subjects] CL_new;
+    vector[n_subjects] VC_new;
+    vector[n_subjects] KA_new;
+    vector[n_subjects] KE_new;
     
     vector[n_total] dv_pred;
     matrix[n_total, n_cmt] x_pred;
+    vector[n_total] dv_epred;
+    matrix[n_total, n_cmt] x_epred;
     vector[n_total] dv_ipred;
     matrix[n_total, n_cmt] x_ipred;
+    
+    matrix[n_subjects, n_random] eta_new;
+    matrix[n_subjects, n_random] theta_new;
+    
+    vector[n_races] theta_vc_race = [0, theta_vc_race2, theta_vc_race3, 
+                                     theta_vc_race4]';
+    
+    for(i in 1:n_subjects){
+      eta_new[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
+                                               diag_pre_multiply(omega, L))';
+    }
+    theta_new = (rep_matrix(to_row_vector({TVCL, TVVC, TVKA}), n_subjects) .* exp(eta_new));
 
     for(j in 1:n_subjects){
-      
+    
       real wt_over_70 = wt[j]/70;
       real wt_adjustment_cl = wt_over_70^theta_cl_wt;
       real wt_adjustment_vc = wt_over_70^theta_vc_wt;
       real cmppi_adjustment_ka = exp(theta_ka_cmppi*cmppi[j]);
       real egfr_adjustment_cl = (egfr[j]/90)^theta_cl_egfr;
+      real race_adjustment_vc = exp(theta_vc_race[race[j]]);
+      
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j
+      CL_new[j] = theta_j_new[1] * wt_adjustment_cl * egfr_adjustment_cl;
+      VC_new[j] = theta_j_new[2] * wt_adjustment_vc * race_adjustment_vc;
+      KA_new[j] = theta_j_new[3] * cmppi_adjustment_ka;
+      KE_new[j] = CL_new[j]/VC_new[j];
       
       real cl_p = TVCL * wt_adjustment_cl * egfr_adjustment_cl;
-      real vc_p = TVVC * wt_adjustment_vc;
+      real vc_p = TVVC * wt_adjustment_vc * race_adjustment_vc;
       real ka_p = TVKA * cmppi_adjustment_ka;
-      
+    
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
+      
       K[1, 1] = -KA[j];
       K[2, 1] = KA[j];
-      K[2, 2] = -CL[j]/VC[j];
+      K[2, 2] = -KE[j];
       
       x_ipred[subj_start[j]:subj_end[j], ] =
         pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -372,10 +406,25 @@ generated quantities{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          K, bioav, tlag)';
-                           
-      K_tv[1, 1] = -ka_p;
-      K_tv[2, 1] = ka_p;
-      K_tv[2, 2] = -cl_p/vc_p;
+                         
+      K_epred[1, 1] = -KA_new[j];
+      K_epred[2, 1] = KA_new[j];
+      K_epred[2, 2] = -KE_new[j];
+      
+      x_epred[subj_start[j]:subj_end[j], ] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K_epred, bioav, tlag)';
+                         
+      K_p[1, 1] = -ka_p;
+      K_p[2, 1] = ka_p;
+      K_p[2, 2] = -cl_p/vc_p;
 
       x_pred[subj_start[j]:subj_end[j],] =
         pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -386,10 +435,13 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         K_tv, bioav, tlag)';
-                           
+                         K_p, bioav, tlag)';
+      
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
+        
+      dv_epred[subj_start[j]:subj_end[j]] =
+        x_epred[subj_start[j]:subj_end[j], 2] ./ VC_new[j];
       
       dv_pred[subj_start[j]:subj_end[j]] =
         x_pred[subj_start[j]:subj_end[j], 2] ./ vc_p;
@@ -397,22 +449,20 @@ generated quantities{
     }
 
     pred = dv_pred[i_obs];
+    epred_stan = dv_epred[i_obs];
     ipred = dv_ipred[i_obs];
-
-    res = log(dv_obs) - log(pred);
-    ires = log(dv_obs) - log(ipred);
 
     for(i in 1:n_obs){
       real log_ipred_tmp = log(ipred[i]);
+      real log_epred_tmp = log(epred_stan[i]);
       dv_ppc[i] = lognormal_rng(log_ipred_tmp, sigma);
+      epred[i] = lognormal_rng(log_epred_tmp, sigma);
       if(bloq_obs[i] == 1){
         log_lik[i] = lognormal_lcdf(lloq_obs[i] | log_ipred_tmp, sigma);
       }else{
         log_lik[i] = lognormal_lpdf(dv_obs[i] | log_ipred_tmp, sigma);
       }
-      wres[i] = res[i]/sigma;
-      iwres[i] = ires[i]/sigma;
     }
+    iwres = (log(dv_obs) - log(ipred))/sigma;
   }
 }
-

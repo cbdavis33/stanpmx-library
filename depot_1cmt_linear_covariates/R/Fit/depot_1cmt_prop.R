@@ -8,7 +8,7 @@ library(tidyverse)
 set_cmdstan_path("~/Torsten/cmdstan")
 
 nonmem_data <- read_csv(
-  "depot_1cmt_linear_covariates/Data/depot_1cmt_prop_covariates.csv",
+  "depot_1cmt_linear_covariates//Data/depot_1cmt_prop_covariates.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -35,7 +35,7 @@ nonmem_data %>%
 #     scale_color_discrete(name = "Dose (mg)") +
 #     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
 #                        limits = c(NA, NA),
-#                        trans = "log10") +
+#                        trans = "identity") +
 #     scale_x_continuous(name = "Time (d)",
 #                        breaks = seq(0, 216, by = 24),
 #                        labels = seq(0, 216/24, by = 24/24),
@@ -45,7 +45,7 @@ nonmem_data %>%
 #           axis.title = element_text(size = 18, face = "bold"),
 #           axis.line = element_line(linewidth = 2),
 #           legend.position = "bottom"))
-
+# 
 # p1 +
 #   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 # 
@@ -96,8 +96,8 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 1,
-                  location_tvvc = 8,
+                  location_tvcl = 0.5,
+                  location_tvvc = 4,
                   location_tvka = 0.8,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
@@ -108,13 +108,13 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model("depot_1cmt_linear/Stan/Fit/depot_1cmt_prop.stan",
                        cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(data = stan_data,
-                    seed = 11235,
+                    seed = 112358,
                     chains = 4,
                     parallel_chains = 4,
                     threads_per_chain = parallel::detectCores()/4,
@@ -123,17 +123,15 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "depot_1cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "prop",
+                    # output_dir = "depot_1cmt_linear_covariates/Stan/Fits/Output",
+                    # output_basename = "prop",
                     init = function() list(TVCL = rlnorm(1, log(1), 0.3),
                                            TVVC = rlnorm(1, log(8), 0.3),
                                            TVKA = rlnorm(1, log(0.8), 0.3),
                                            omega = rlnorm(3, log(0.3), 0.3),
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object(
-  "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop_no_covariates.rds")
+fit$save_object("depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_prop.rds")
 
 fit$save_data_file(dir = "depot_1cmt_linear_covariates/Stan/Fits/Stan_Data",
-                   basename = "prop", timestamp = FALSE, 
-                   random = FALSE)
+                   basename = "prop", timestamp = FALSE, random = FALSE)

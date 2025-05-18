@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -18,25 +18,27 @@ model <- cmdstan_model(
   cpp_options = list(stan_threads = TRUE))
 
 priors <- model$sample(data = stan_data,
-                    seed = 11235,
-                    chains = 4,
-                    parallel_chains = 4,
-                    threads_per_chain = 1,
-                    iter_warmup = 500,
-                    iter_sampling = 1000,
-                    adapt_delta = 0.8,
-                    refresh = 500,
-                    max_treedepth = 10,
-                    init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                           TVVC = rlnorm(1, log(8), 0.3),
-                                           TVKA = rlnorm(1, log(0.8), 0.3),
-                                           theta_cl_wt = rnorm(1), 
-                                           theta_vc_wt = rnorm(1), 
-                                           theta_ka_cmppi = rnorm(1), 
-                                           theta_cl_egfr = rnorm(1),
-                                           omega = rlnorm(3, log(0.3), 0.3),
-                                           sigma = rlnorm(2, log(0.2), 0.3)))
-
+                       seed = 235813,
+                       chains = 4,
+                       parallel_chains = 4,
+                       threads_per_chain = 1,
+                       iter_warmup = 500,
+                       iter_sampling = 1000,
+                       adapt_delta = 0.8,
+                       refresh = 500,
+                       max_treedepth = 10,
+                       init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                              TVVC = rlnorm(1, log(8), 0.3),
+                                              TVKA = rlnorm(1, log(0.8), 0.3),
+                                              theta_cl_wt = rnorm(1, 0, 0.2),
+                                              theta_vc_wt = rnorm(1, 0, 0.2),
+                                              theta_ka_cmppi = rnorm(1, 0, 0.2),
+                                              theta_cl_egfr = rnorm(1, 0, 0.2),
+                                              theta_vc_race2 = rnorm(1, 0, 0.2),
+                                              theta_vc_race3 = rnorm(1, 0, 0.2),
+                                              theta_vc_race4 = rnorm(1, 0, 0.2),
+                                              omega = rlnorm(3, log(0.3), 0.3),
+                                              sigma = rlnorm(2, log(0.4), 0.3)))
 
 fit <- read_rds(
   "depot_1cmt_linear_covariates/Stan/Fits/depot_1cmt_ppa_covariates.rds")
@@ -47,10 +49,10 @@ parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_subset(fit$metadata()$stan_variables, "theta"),
                              str_c("omega_", c("cl", "vc", "ka")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             str_c("sigma_", c("p", "a")))
+                             "sigma_p", "sigma_a")
 
 draws_all_df <- priors$draws(format = "draws_df") %>% 
-  mutate(target = "prior") %>%
+  mutate(target = "prior") %>% 
   bind_rows(draws_df %>% 
               mutate(target = "posterior")) %>% 
   select(all_of(parameters_to_summarize), target) %>% 
@@ -73,12 +75,17 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     filter(str_detect(variable, "theta_")) %>% 
     mutate(variable = factor(variable, 
                              levels = c("theta_cl_wt", "theta_vc_wt", 
-                                        "theta_ka_cmppi", "theta_cl_egfr")),
+                                        "theta_ka_cmppi", "theta_cl_egfr",
+                                        "theta_vc_race2", "theta_vc_race3", 
+                                        "theta_vc_race4")),
            variable = fct_recode(variable, 
                                  "theta[CL[WT]]" = "theta_cl_wt",
                                  "theta[VC[WT]]" = "theta_vc_wt",
                                  "theta[KA[CMPPI]]" = "theta_ka_cmppi",
-                                 "theta[CL[eGFR]]" = "theta_cl_egfr")) %>% 
+                                 "theta[CL[eGFR]]" = "theta_cl_egfr",
+                                 "theta[VC[RACE2]]" = "theta_vc_race2",
+                                 "theta[VC[RACE3]]" = "theta_vc_race3",
+                                 "theta[VC[RACE4]]" = "theta_vc_race4")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -139,7 +146,7 @@ layout <- c(
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 3.5, r = 6),
   area(t = 4, l = 1, b = 4.5, r = 6),
-  area(t = 5, l = 1, b = 5.5, r = 6)
+  area(t = 5, l = 3, b = 5.5, r = 4)
 )
 
 target_comparison_tv /
@@ -150,3 +157,4 @@ target_comparison_tv /
   plot_layout(guides = 'collect', 
               design = layout) &
   theme(legend.position = "bottom")
+
