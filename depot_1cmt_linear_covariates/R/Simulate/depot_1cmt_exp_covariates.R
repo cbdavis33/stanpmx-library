@@ -19,6 +19,10 @@ theta_vc_wt <- 1
 theta_ka_cmppi <- -0.8
 theta_cl_egfr <- 0.5
 
+theta_vc_race2 <- 0
+theta_vc_race3 <- -0.3
+theta_vc_race4 <- 0.25
+
 omega_cl <- 0.3
 omega_vc <- 0.3
 omega_ka <- 0.3
@@ -28,7 +32,9 @@ R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma <- 0.2
 
-n_subjects_per_dose <- 25
+cor_p_a <- 0
+
+n_subjects_per_dose <- 40
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
                          cmt = 1, amt = c(50, 100, 200, 400), ss = 0, tinf = 0, 
@@ -103,6 +109,14 @@ egfr <- nonmem_data_simulate %>%
   ungroup() %>% 
   pull(EGFR)
 
+race <- nonmem_data_simulate %>% 
+  group_by(ID) %>% 
+  distinct(RACE) %>% 
+  ungroup() %>% 
+  pull(RACE)
+
+n_races <- length(unique(race))
+
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
                   time = nonmem_data_simulate$TIME,
@@ -118,6 +132,8 @@ stan_data <- list(n_subjects = n_subjects,
                   wt = wt,
                   cmppi = cmppi,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   TVCL = TVCL,
                   TVVC = TVVC,
                   TVKA = TVKA,
@@ -128,6 +144,9 @@ stan_data <- list(n_subjects = n_subjects,
                   theta_vc_wt = theta_vc_wt,
                   theta_ka_cmppi = theta_ka_cmppi,
                   theta_cl_egfr = theta_cl_egfr,
+                  theta_vc_race2 = theta_vc_race2,
+                  theta_vc_race3 = theta_vc_race3,
+                  theta_vc_race4 = theta_vc_race4,
                   R = R,
                   sigma = sigma,
                   solver = 1) # analytical = 1, mat exp = 2, rk45 = 3, bdf = 4
@@ -137,7 +156,7 @@ model <- cmdstan_model(
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 11235,
+                               seed = 2468,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
@@ -149,7 +168,8 @@ params_ind <- simulated_data$draws(c("CL", "VC", "KA")) %>%
                distinct(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR),
              by = "ID") %>% 
   ungroup() %>%
-  select(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA)
+  select(ID, SEXF, AGE, RACE, WT, CMPPI, EGFR, CL, VC, KA) %>% 
+  mutate(across(c(SEXF, RACE, CMPPI), as.factor))
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -206,6 +226,29 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
         ggplot(aes(x = EGFR, y = CL)) + 
         geom_point() + 
         geom_smooth(method = "lm") +
+        theme_bw())) /
+  (params_ind %>% 
+     ggplot(aes(x = RACE, y = VC, group = RACE)) + 
+     geom_boxplot() + 
+     theme_bw())
+
+((params_ind %>% 
+    ggplot(aes(x = AGE, y = CL)) + 
+    geom_point() + 
+    geom_smooth(method = "lm") +
+    theme_bw()) |
+    (params_ind %>% 
+       ggplot(aes(x = AGE, y = VC)) + 
+       geom_point() + 
+       geom_smooth(method = "lm") +
+       theme_bw())) /
+  ((params_ind %>% 
+      ggplot(aes(x = SEXF, y = CL, group = SEXF)) + 
+      geom_boxplot() + 
+      theme_bw()) +
+     (params_ind %>% 
+        ggplot(aes(x = RACE, y = CL, group = RACE)) + 
+        geom_boxplot() + 
         theme_bw()))
 
 data %>%
