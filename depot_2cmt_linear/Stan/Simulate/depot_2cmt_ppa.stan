@@ -1,12 +1,11 @@
 // First Order Absorption (oral/subcutaneous)
-// Two-compartment PK Model
-// IIV on CL, VC, Q, VP, and KA (full covariance matrix)
+// One-compartment PK Model
+// IIV on CL, VC, Q, VP, KA
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
 // Observations are generated from a normal that is truncated below at 0
 // Since we have a normal distribution on the error, but the DV must be > 0, it
 //   generates values from a normal that is truncated below at 0
-
 
 functions{
   
@@ -92,7 +91,7 @@ transformed data{
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-  
+
   vector[2] sigma = [sigma_p, sigma_a]';
   matrix[2, 2] R_Sigma = rep_matrix(1, 2, 2);
   R_Sigma[1, 2] = cor_p_a;
@@ -142,7 +141,6 @@ generated quantities{
     for(j in 1:n_subjects){
       
       if(solver == 1){
-        
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_twocpt(time[subj_start[j]:subj_end[j]],
                            amt[subj_start[j]:subj_end[j]],
@@ -153,7 +151,6 @@ generated quantities{
                            addl[subj_start[j]:subj_end[j]],
                            ss[subj_start[j]:subj_end[j]],
                            {CL[j], Q[j], VC[j], VP[j], KA[j]})';
-                           
       }else if(solver == 2){
         
         matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
@@ -212,5 +209,4 @@ generated quantities{
     }
   }
 }
-
 

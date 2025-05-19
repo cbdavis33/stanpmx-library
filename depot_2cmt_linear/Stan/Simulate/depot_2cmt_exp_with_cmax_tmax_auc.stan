@@ -1,6 +1,6 @@
 // First Order Absorption (oral/subcutaneous)
-// Two-compartment PK Model
-// IIV on CL, VC, Q, VP, and KA (full covariance matrix)
+// One-compartment PK Model
+// IIV on CL, VC, Q, VP, KA
 // exponential error - DV = IPRED*exp(eps)
 // General ODE solution using Torsten
 // Output includes individual Cmax over the whole time period, Tmax between t1 
@@ -8,7 +8,7 @@
 //   dosing interval)
 
 functions{
-  
+
   vector depot_2cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
     
@@ -92,7 +92,7 @@ transformed data{
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-  
+
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding, but could be data or a parameter in another situation
   
@@ -107,10 +107,10 @@ generated quantities{
   vector[n_total] ipred; // concentration with no residual error
   vector[n_total] dv;    // concentration with residual error
   
-  vector[n_total] auc;            // AUC 
-  vector[n_subjects] auc_t1_t2;   // AUC from t1 up to t2
-  vector[n_subjects] c_max;       // Cmax
-  vector[n_subjects] t_max;       // Tmax
+  vector[n_total] auc;                // AUC 
+  vector[n_subjects] auc_t1_t2;       // AUC from t1 up to t2
+  vector[n_subjects] c_max;           // Cmax
+  vector[n_subjects] t_max;           // Tmax
   vector[n_subjects] t_half_alpha;    // alpha half-life
   vector[n_subjects] t_half_terminal; // terminal half-life
   
@@ -129,9 +129,6 @@ generated quantities{
   
     matrix[n_total, n_cmt] x_ipred;
     
-    vector[n_subjects] alpha;
-    vector[n_subjects] beta;
-    
     for(i in 1:n_subjects){
       eta[, i] = multi_normal_cholesky_rng(rep_vector(0, n_random),
                                            diag_pre_multiply(omega, L));
@@ -144,10 +141,13 @@ generated quantities{
     VP = col(theta, 4);
     KA = col(theta, 5);
     
-    alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
-    beta = 0.5*(CL./VC + Q./VC + Q./VP - 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    vector[n_subjects] alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    vector[n_subjects] beta = 0.5*(CL./VC + Q./VC + Q./VP - 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    
+    t_half_alpha = log(2)/alpha;
+    t_half_terminal = log(2)/beta;
     
     for(j in 1:n_subjects){
       
@@ -174,8 +174,6 @@ generated quantities{
       auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
       c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]);
       t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
-      t_half_alpha[j] = log(2)/alpha[j];
-      t_half_terminal[j] = log(2)/beta[j];
     
     }
 

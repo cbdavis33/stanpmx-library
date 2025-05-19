@@ -1,8 +1,8 @@
 rm(list = ls())
 cat("\014")
 
-library(cmdstanr)
 library(patchwork)
+library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -34,8 +34,8 @@ priors <- model$sample(data = stan_data,
                                               omega = rlnorm(5, log(0.3), 0.3),
                                               sigma = rlnorm(2, log(0.2), 0.3)))
 
-
 fit <- read_rds("depot_2cmt_linear/Stan/Fits/depot_2cmt_ppa.rds")
+
 draws_df <- fit$draws(format = "draws_df")
 
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
@@ -83,10 +83,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_cor <- draws_all_df %>% 
-    filter(variable %in% c("cor_cl_vc", "cor_cl_q", "cor_cl_vp", "cor_cl_ka",
-                           "cor_vc_q", "cor_vc_vp", "cor_vc_ka",
-                           "cor_q_vp", "cor_q_ka",
-                           "cor_vp_ka")) %>% 
+    filter(str_detect(variable, "cor_")) %>% 
     mutate(variable = 
              factor(variable, 
                     levels = c("cor_cl_vc", "cor_cl_q", "cor_cl_vp", "cor_cl_ka",
@@ -143,4 +140,3 @@ target_comparison_tv /
   plot_layout(guides = 'collect', 
               design = layout) &
   theme(legend.position = "bottom")
-
