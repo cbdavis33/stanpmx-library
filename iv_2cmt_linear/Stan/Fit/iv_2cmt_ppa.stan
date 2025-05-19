@@ -2,8 +2,7 @@
 // Two-compartment PK Model
 // IIV on CL, VC, Q, and VP (full covariance matrix)
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
-// Matrix-exponential solution using Torsten (the matrix-exponential seems to be
-//   faster than the analytical solution for this model)
+// Matrix-exponential solution using Torsten 
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
 // Since we have a normal distribution on the error, but the DV must be > 0, it
@@ -11,14 +10,6 @@
 // For PPC, it generates values from a normal that is truncated below at 0
 
 functions{
-
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
   
   int num_between(int lb, int ub, array[] int y){
     
@@ -73,8 +64,8 @@ functions{
                         array[] real time, array[] real rate, array[] real ii, 
                         array[] int addl, array[] int ss,
                         array[] int subj_start, array[] int subj_end, 
-                        vector CL, vector VC, vector Q, vector VP, 
-                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a, 
+                        vector CL, vector VC, vector Q, vector VP,
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a,
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, int n_cmt){
@@ -144,7 +135,7 @@ functions{
         ptarget += normal_lpdf(dv_obs_slice[i] | ipred_tmp, sigma_tmp) -
                    normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
       }
-    }                                         
+    }                                           
                               
     return ptarget;
                            
@@ -215,11 +206,11 @@ transformed data{
   int n_cmt = 2;                       // Number of states in the ODEs
   
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
-                                      scale_omega_q, scale_omega_vp}; 
-                                      
+                                      scale_omega_q, scale_omega_vp};
+  
   array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
   
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+  array[n_subjects] int seq_subj = linspaced_int_array(n_subjects, 1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
@@ -311,14 +302,14 @@ model{
                          amt, cmt, evid, time, 
                          rate, ii, addl, ss, subj_start, subj_end, 
                          CL, VC, Q, VP,
-                         sigma_sq_p, sigma_sq_a, sigma_p_a, 
+                         sigma_sq_p, sigma_sq_a, sigma_p_a,
                          lloq, bloq,
                          n_random, n_subjects, n_total,
                          bioav, tlag, n_cmt);
   }
 }
 generated quantities{
-  
+
   real<lower = 0> omega_cl = omega[1];
   real<lower = 0> omega_vc = omega[2];
   real<lower = 0> omega_q = omega[3];
@@ -342,14 +333,13 @@ generated quantities{
   real omega_vc_vp;
   real omega_q_vp;
 
-  vector[n_obs] ipred;
-  vector[n_obs] pred;
-  vector[n_obs] dv_ppc;
-  vector[n_obs] log_lik;
-  vector[n_obs] res;
-  vector[n_obs] wres;
-  vector[n_obs] ires;
-  vector[n_obs] iwres;
+  vector[no_gq_predictions ? 0 : n_obs] pred;
+  vector[no_gq_predictions ? 0 : n_obs] epred_stan;
+  vector[no_gq_predictions ? 0 : n_obs] ipred;
+  vector[no_gq_predictions ? 0 : n_obs] epred;
+  vector[no_gq_predictions ? 0 : n_obs] dv_ppc;
+  vector[no_gq_predictions ? 0 : n_obs] log_lik;
+  vector[no_gq_predictions ? 0 : n_obs] iwres;
  
   {
 
@@ -374,23 +364,49 @@ generated quantities{
 
   if(no_gq_predictions == 0){
     
+    vector[n_subjects] CL_new;
+    vector[n_subjects] VC_new;
+    vector[n_subjects] Q_new;
+    vector[n_subjects] VP_new;
+    
     vector[n_total] dv_pred;
     matrix[n_total, n_cmt] x_pred;
+    vector[n_total] dv_epred;
+    matrix[n_total, n_cmt] x_epred;
     vector[n_total] dv_ipred;
     matrix[n_total, n_cmt] x_ipred;
+    
+    matrix[n_subjects, n_random] eta_new;
+    matrix[n_subjects, n_random] theta_new;
+    
+    for(i in 1:n_subjects){
+      eta_new[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
+                                               diag_pre_multiply(omega, L))';
+    }
+    theta_new = (rep_matrix(to_row_vector({TVCL, TVVC, TVQ, TVVP}), n_subjects) .* exp(eta_new));
 
     for(j in 1:n_subjects){
         
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
+      
+      real cl_p = TVCL;
+      real vc_p = TVVC;
+      real q_p = TVQ;
+      real vp_p = TVVP;
+      
+      CL_new[j] = theta_j_new[1];
+      VC_new[j] = theta_j_new[2];
+      Q_new[j] = theta_j_new[3];
+      VP_new[j] = theta_j_new[4];
+    
+      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
+      
       real ke = CL[j]/VC[j];
       real k_cp = Q[j]/VC[j];
       real k_pc = Q[j]/VP[j];
-        
-      real tvke = TVCL/TVVC;
-      real tvk_cp = TVQ/TVVC;
-      real tvk_pc = TVQ/TVVP;
-        
-      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+    
       K[1, 1] = -(ke + k_cp);
       K[1, 2] = k_pc;
       K[2, 1] = k_cp;
@@ -407,10 +423,34 @@ generated quantities{
                          ss[subj_start[j]:subj_end[j]],
                          K, bioav, tlag)';
                            
-      K_tv[1, 1] = -(tvke + tvk_cp);
-      K_tv[1, 2] = tvk_pc;
-      K_tv[2, 1] = tvk_cp;
-      K_tv[2, 2] = -tvk_pc;
+      real ke_new = CL_new[j]/VC_new[j];
+      real k_cp_new = Q_new[j]/VC_new[j];
+      real k_pc_new = Q_new[j]/VP_new[j];
+    
+      K_epred[1, 1] = -(ke_new + k_cp_new);
+      K_epred[1, 2] = k_pc_new;
+      K_epred[2, 1] = k_cp_new;
+      K_epred[2, 2] = -k_pc_new;
+      
+      x_epred[subj_start[j]:subj_end[j], ] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K_epred, bioav, tlag)';
+      
+      real ke_p = cl_p/vc_p;
+      real k_cp_p = q_p/vc_p;
+      real k_pc_p = q_p/vp_p;
+    
+      K_p[1, 1] = -(ke_p + k_cp_p);
+      K_p[1, 2] = k_pc_p;
+      K_p[2, 1] = k_cp_p;
+      K_p[2, 2] = -k_pc_p;
 
       x_pred[subj_start[j]:subj_end[j],] =
         pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -421,27 +461,32 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         K_tv, bioav, tlag)';
+                         K_p, bioav, tlag)';
       
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], 1] ./ VC[j];
+        
+      dv_epred[subj_start[j]:subj_end[j]] =
+        x_epred[subj_start[j]:subj_end[j], 1] ./ VC_new[j];
       
       dv_pred[subj_start[j]:subj_end[j]] =
-        x_pred[subj_start[j]:subj_end[j], 1] ./ TVVC;
+        x_pred[subj_start[j]:subj_end[j], 1] ./ vc_p;
       
     }
 
     pred = dv_pred[i_obs];
+    epred_stan = dv_epred[i_obs];
     ipred = dv_ipred[i_obs];
-
-    res = dv_obs - pred;
-    ires = dv_obs - ipred;
 
     for(i in 1:n_obs){
       real ipred_tmp = ipred[i];
       real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
-                            2*ipred_tmp*sigma_p_a);
+                          2*ipred_tmp*sigma_p_a);
+      real epred_tmp = epred_stan[i];
+      real sigma_tmp_e = sqrt(square(epred_tmp) * sigma_sq_p + sigma_sq_a + 
+                             2*epred_tmp*sigma_p_a);
       dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      epred[i] = normal_lb_rng(epred_tmp, sigma_tmp_e, 0.0);
       if(bloq_obs[i] == 1){
         // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
         //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
@@ -453,9 +498,9 @@ generated quantities{
         log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
                      normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
       }
-      wres[i] = res[i]/sigma_tmp;
-      iwres[i] = ires[i]/sigma_tmp;
+      iwres[i] = (dv_obs[i] - ipred_tmp)/sigma_tmp;
     }
   }
 }
+
 

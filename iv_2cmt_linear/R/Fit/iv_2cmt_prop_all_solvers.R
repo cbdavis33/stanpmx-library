@@ -35,24 +35,24 @@ nonmem_data %>%
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     scale_color_discrete(name = "Dose (mg)") +
-    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
+    scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                        limits = c(NA, NA),
-                       trans = "log10") + 
+                       trans = "identity") +
     scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, max(nonmem_data$time), by = 14),
-                       labels = seq(0, max(nonmem_data$time), by = 14),
-                       limits = c(0, max(nonmem_data$time))) +
+                       breaks = seq(0, 216, by = 24),
+                       labels = seq(0, 216/24, by = 24/24),
+                       limits = c(0, NA)) +
     theme_bw(18) +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           axis.line = element_line(linewidth = 2),
           legend.position = "bottom"))
 
-p1 +
-  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-
-p1 +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# p1 +
+#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
+# 
+# p1 +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 
 n_subjects <- nonmem_data %>%  # number of individuals
@@ -113,6 +113,7 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
+                  no_gq_predictions = 0,
                   solver = solver)
 
 model <- cmdstan_model("iv_2cmt_linear/Stan/Fit/iv_2cmt_prop_all_solvers.stan",
@@ -129,9 +130,9 @@ fit_analytical <- model$sample(
   adapt_delta = 0.8,
   refresh = 500,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                         TVVC = rlnorm(1, log(3), 0.3),
-                         TVQ = rlnorm(1, log(1), 0.3),
+  init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                         TVVC = rlnorm(1, log(4), 0.3),
+                         TVQ = rlnorm(1, log(0.75), 0.3),
                          TVVP = rlnorm(1, log(4), 0.3),
                          omega = rlnorm(4, log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
@@ -152,9 +153,9 @@ fit_mat_exp <- model$sample(
   adapt_delta = 0.8,
   refresh = 500,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                         TVVC = rlnorm(1, log(3), 0.3),
-                         TVQ = rlnorm(1, log(1), 0.3),
+  init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                         TVVC = rlnorm(1, log(4), 0.3),
+                         TVQ = rlnorm(1, log(0.75), 0.3),
                          TVVP = rlnorm(1, log(4), 0.3),
                          omega = rlnorm(4, log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
@@ -174,33 +175,12 @@ fit_rk45 <- model$sample(
   adapt_delta = 0.8,
   refresh = 100,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                         TVVC = rlnorm(1, log(3), 0.3),
-                         TVQ = rlnorm(1, log(1), 0.3),
+  init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                         TVVC = rlnorm(1, log(4), 0.3),
+                         TVQ = rlnorm(1, log(0.75), 0.3),
                          TVVP = rlnorm(1, log(4), 0.3),
                          omega = rlnorm(4, log(0.3), 0.3),
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
 fit_rk45$save_object("iv_2cmt_linear/Stan/Fits/iv_2cmt_prop_rk45.rds")
-
-stan_data$solver <- 4
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                         TVVC = rlnorm(1, log(3), 0.3),
-                         TVQ = rlnorm(1, log(1), 0.3),
-                         TVVP = rlnorm(1, log(4), 0.3),
-                         omega = rlnorm(4, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_bdf$save_object("iv_2cmt_linear/Stan/Fits/iv_2cmt_prop_bdf.rds")
 

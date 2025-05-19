@@ -2,9 +2,10 @@
 // Two-compartment PK Model
 // IIV on CL, VC, Q, and VP (full covariance matrix)
 // exponential error - DV = IPRED*exp(eps)
-// Output includes individual AUC since 0 for every timepoint, and AUC between 
-//   t1 and t2 (like a dosing interval). If you want Cmax and Tmax, make sure to
-//   simulate the end of the infusion and pull that time and concentration out.
+// Output includes individual half-life, AUC since 0 for every timepoint, and 
+//   AUC between t1 and t2 (like a dosing interval). If you want Cmax and Tmax, 
+//   make sure to simulate the end of the infusion and pull that time and 
+//   concentration out.
 
 functions{
   
@@ -63,9 +64,9 @@ data{
   
   corr_matrix[4] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
-                     // cor_cl_vc, cor_cl_ka, ... and then construct the 
-                     // correlation matrix in transformed data, but it's easy
-                     // enough to do in R
+                     // cor_cl_vc and then construct the 
+                     // correlation matrix in transformed data like is done with
+                     // R_Sigma, but it's easy enough to do in R
   
   real<lower = 0> sigma;
   
@@ -77,7 +78,7 @@ transformed data{
   
   int n_random = 4;
   int n_cmt = 4;
-
+  
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
@@ -115,9 +116,6 @@ generated quantities{
   
     matrix[n_total, n_cmt] x_ipred;
     
-    vector[n_subjects] alpha;
-    vector[n_subjects] beta;
-    
     for(i in 1:n_subjects){
       eta[, i] = multi_normal_cholesky_rng(rep_vector(0, n_random),
                                            diag_pre_multiply(omega, L));
@@ -129,10 +127,13 @@ generated quantities{
     Q = col(theta, 3);
     VP = col(theta, 4);
     
-    alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
-    beta = 0.5*(CL./VC + Q./VC + Q./VP - 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    vector[n_subjects] alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    vector[n_subjects] beta = 0.5*(CL./VC + Q./VC + Q./VP - 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    
+    t_half_alpha = log(2)/alpha;
+    t_half_terminal = log(2)/beta;
     
     for(j in 1:n_subjects){
 
@@ -157,8 +158,6 @@ generated quantities{
                                 x_ipred[subj_start[j]:subj_end[j], 3] ./ VC[j];
       
       auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]) / VC[j];
-      t_half_alpha[j] = log(2)/alpha[j];
-      t_half_terminal[j] = log(2)/beta[j];
     
     }
 
@@ -171,4 +170,6 @@ generated quantities{
     }
   }
 }
+
+
 
