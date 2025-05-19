@@ -26,10 +26,10 @@ R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma <- 0.2
 
-n_subjects_per_dose <- 6
+n_subjects_per_dose <- 8
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
-                         cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0, 
+                         cmt = 1, amt = c(50, 100, 200), ss = 0, tinf = 0, 
                          evid = 1) %>%
   as_tibble() %>% 
   rename_all(toupper) %>%
@@ -106,24 +106,23 @@ model <- cmdstan_model(
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 11235,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", 
+params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", "KA",
                                      "auc_t1_t2", "c_max", "t_max", 
                                      "t_half_alpha", "t_half_terminal")) %>% 
-  spread_draws(CL[i], VC[i], Q[i], VP[i], KA[i],
-               auc_t1_t2[i], c_max[i], t_max[i],
-               t_half_alpha[i], t_half_terminal[i]) %>% 
+  spread_draws(c(CL, VC, Q, VP, KA,
+                 auc_t1_t2, c_max, t_max, t_half_alpha, t_half_terminal)[i]) %>% 
   inner_join(dosing_data %>% 
                mutate(i = 1:n()),
              by = "i") %>% 
   ungroup() %>%
-  select(ID, CL, VC, Q, VP, KA, auc_t1_t2, c_max, t_max,
-         t_half_alpha, t_half_terminal)
+  select(ID, CL, VC, Q, VP, KA, auc_t1_t2, c_max, 
+         t_max, t_half_alpha, t_half_terminal)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 

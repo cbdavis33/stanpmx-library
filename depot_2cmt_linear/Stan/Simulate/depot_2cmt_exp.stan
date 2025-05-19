@@ -1,10 +1,19 @@
 // First Order Absorption (oral/subcutaneous)
-// Two-compartment PK Model
-// IIV on CL, VC, Q, VP, and KA (full covariance matrix)
+// One-compartment PK Model
+// IIV on CL, VC, Q, VP, KA
 // exponential error - DV = IPRED*exp(eps)
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
 
 functions{
+  
+  real normal_lb_rng(real mu, real sigma, real lb){
+    
+    real p_lb = normal_cdf(lb | mu, sigma);
+    real u = uniform_rng(p_lb, 1);
+    real y = mu + sigma * inv_Phi(u);
+    return y;
+
+  }
   
   vector depot_2cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
@@ -120,7 +129,6 @@ generated quantities{
     for(j in 1:n_subjects){
       
       if(solver == 1){
-        
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_twocpt(time[subj_start[j]:subj_end[j]],
                            amt[subj_start[j]:subj_end[j]],
@@ -131,7 +139,6 @@ generated quantities{
                            addl[subj_start[j]:subj_end[j]],
                            ss[subj_start[j]:subj_end[j]],
                            {CL[j], Q[j], VC[j], VP[j], KA[j]})';
-                           
       }else if(solver == 2){
         
         matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
@@ -140,7 +147,7 @@ generated quantities{
         K[2, 1] = KA[j];
         K[2, 2] = -((CL[j] + Q[j])/VC[j]);
         K[2, 3] = Q[j]/VP[j];
-        K[3, 2] = Q[j]/VC[j];;
+        K[3, 2] = Q[j]/VC[j];
         K[3, 3] = -Q[j]/VP[j];
         
         x_ipred[subj_start[j]:subj_end[j],] =

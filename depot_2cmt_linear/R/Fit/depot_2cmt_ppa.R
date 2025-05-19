@@ -115,13 +115,13 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model("depot_2cmt_linear/Stan/Fit/depot_2cmt_ppa.stan",
                        cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(data = stan_data,
-                    seed = 11235,
+                    seed = 112358,
                     chains = 4,
                     parallel_chains = 4,
                     threads_per_chain = parallel::detectCores()/4,
@@ -130,8 +130,8 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "depot_2cmt_linear/Stan/Fits/Output",
-                    output_basename = "ppa",
+                    # output_dir = "depot_2cmt_linear/Stan/Fits/Output",
+                    # output_basename = "ppa",
                     init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                                            TVVC = rlnorm(1, log(18), 0.3),
                                            TVQ = rlnorm(1, log(2), 0.3),
@@ -144,4 +144,3 @@ fit$save_object("depot_2cmt_linear/Stan/Fits/depot_2cmt_ppa.rds")
 
 fit$save_data_file(dir = "depot_2cmt_linear/Stan/Fits/Stan_Data",
                    basename = "ppa", timestamp = FALSE, random = FALSE)
-
