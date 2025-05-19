@@ -130,9 +130,9 @@ fit <- model$sample(data = stan_data,
                     max_treedepth = 10,
                     output_dir = "iv_2cmt_linear/Stan/Fits/Output",
                     output_basename = "ppa",
-                    init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                           TVVC = rlnorm(1, log(3), 0.3),
-                                           TVQ = rlnorm(1, log(1), 0.3),
+                    init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                                           TVVC = rlnorm(1, log(4), 0.3),
+                                           TVQ = rlnorm(1, log(0.75), 0.3),
                                            TVVP = rlnorm(1, log(4), 0.3),
                                            omega = rlnorm(4, log(0.3), 0.3),
                                            sigma = rlnorm(2, log(0.4), 0.3)))
@@ -141,6 +141,4 @@ fit$save_object("iv_2cmt_linear/Stan/Fits/iv_2cmt_ppa.rds")
 
 fit$save_data_file(dir = "iv_2cmt_linear/Stan/Fits/Stan_Data",
                    basename = "ppa", timestamp = FALSE, random = FALSE)
-
-
 

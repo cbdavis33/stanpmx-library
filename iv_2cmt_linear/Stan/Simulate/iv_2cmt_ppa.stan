@@ -1,5 +1,5 @@
 // IV infusion
-// Two-compartment PK Model
+// One-compartment PK Model
 // IIV on CL, VC, Q, and VP (full covariance matrix)
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
@@ -68,7 +68,7 @@ data{
   
   corr_matrix[4] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
-                     // cor_cl_vc, cor_cl_q, ... and then construct the 
+                     // cor_cl_vc and then construct the 
                      // correlation matrix in transformed data like is done with
                      // R_Sigma, but it's easy enough to do in R
   
@@ -87,7 +87,7 @@ transformed data{
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-
+  
   vector[2] sigma = [sigma_p, sigma_a]';
   matrix[2, 2] R_Sigma = rep_matrix(1, 2, 2);
   R_Sigma[1, 2] = cor_p_a;
@@ -206,4 +206,5 @@ generated quantities{
     }
   }
 }
+
 

@@ -23,13 +23,13 @@ R <- diag(rep(1, times = 4))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0
+sigma_a <- 0.5
 
 cor_p_a <- 0
 
 n_subjects_per_dose <- 6
 
-solver <- 2 # analytical = 1, mat exp = 2, rk45 = 3
+solver <- 1 # analytical = 1, mat exp = 2, rk45 = 3
 
 # If using Torsten's analytical solver, dose into the second compartment 
 # (cmt = 2). If using matrix-exponential or ODE, then dose into the first
@@ -158,16 +158,14 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 14),
                        labels = seq(0, max(data$TIME), by = 14),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 data %>%
   select(-IPRED) %>%
-  write_csv("iv_2cmt_linear/Data/iv_2cmt_prop.csv", na = ".")
-  # write_csv("iv_2cmt_linear/Data/iv_2cmt_ppa.csv", na = ".")
+  # write_csv("iv_2cmt_linear/Data/iv_2cmt_prop.csv", na = ".")
+  write_csv("iv_2cmt_linear/Data/iv_2cmt_ppa.csv", na = ".")
 
 params_ind %>%
-  write_csv("iv_2cmt_linear/Data/iv_2cmt_prop_params_ind.csv")
-  # write_csv("iv_2cmt_linear/Data/iv_2cmt_ppa_params_ind.csv")
+  # write_csv("iv_2cmt_linear/Data/iv_2cmt_prop_params_ind.csv")
+  write_csv("iv_2cmt_linear/Data/iv_2cmt_ppa_params_ind.csv")
 
 

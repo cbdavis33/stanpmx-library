@@ -52,7 +52,7 @@ nonmem_data_simulate <- dosing_data %>%
          II = 0,
          CMT = 1,
          EVID = 0,
-         # RATE = 0,
+         RATE = 0,
          TIME = times_to_simulate) %>% 
   ungroup() %>%
   bind_rows(dosing_data) %>% 
@@ -114,7 +114,7 @@ simulated_data <- model$sample(data = stan_data,
 
 params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", 
                                      "auc_t1_t2", 
-                                     "t_half_alpha", "t_half_terminal")) %>% 
+                                     "t_half_alpha", "t_half_terminal")) %>%
   spread_draws(CL[i], VC[i], Q[i], VP[i], 
                auc_t1_t2[i], 
                t_half_alpha[i], t_half_terminal[i]) %>% 
@@ -158,11 +158,8 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        labels = seq(0, max(data$TIME), by = 14),
                        limits = c(0, max(data$TIME))))
 
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
-
 data %>%
-  select(-IPRED) %>% 
+  select(-IPRED) %>%
   write_csv("iv_2cmt_linear/Data/iv_2cmt_exp.csv", na = ".")
 
 params_ind %>%

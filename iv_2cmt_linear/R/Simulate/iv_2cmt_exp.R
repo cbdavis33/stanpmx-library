@@ -26,7 +26,7 @@ sigma <- 0.2
 
 n_subjects_per_dose <- 6
 
-solver <- 2 # analytical = 1, mat exp = 2, rk45 = 3
+solver <- 3 # analytical = 1, mat exp = 2, rk45 = 3
 
 # If using Torsten's analytical solver, dose into the second compartment 
 # (cmt = 2). If using matrix-exponential or ODE, then dose into the first
@@ -56,7 +56,7 @@ nonmem_data_simulate <- dosing_data %>%
          II = 0,
          CMT = if_else(solver == 1, 2, 1),
          EVID = 0,
-         # RATE = 0,
+         RATE = 0,
          TIME = times_to_simulate) %>% 
   ungroup() %>%
   bind_rows(dosing_data) %>% 
@@ -107,7 +107,7 @@ model <- cmdstan_model("iv_2cmt_linear/Stan/Simulate/iv_2cmt_exp.stan")
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 1123,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
@@ -149,15 +149,13 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
     theme_bw(18) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10") + 
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, max(data$TIME), by = 24),
-                       labels = seq(0, max(data$TIME), by = 24),
+    scale_x_continuous(name = "Time (d)",
+                       breaks = seq(0, max(data$TIME), by = 14),
+                       labels = seq(0, max(data$TIME), by = 14),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 data %>%
-  select(-IPRED) %>% 
+  select(-IPRED) %>%
   write_csv("iv_2cmt_linear/Data/iv_2cmt_exp.csv", na = ".")
 
 params_ind %>%

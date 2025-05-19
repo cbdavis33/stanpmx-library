@@ -408,9 +408,11 @@ generated quantities{
 
     for(i in 1:n_obs){
       real ipred_tmp = ipred[i];
-      real sigma_tmp = ipred_tmp*sigma_p;
+      real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
+                          2*ipred_tmp*sigma_p_a);
       real epred_tmp = epred_stan[i];
-      real sigma_tmp_e = epred_tmp*sigma_p;
+      real sigma_tmp_e = sqrt(square(epred_tmp) * sigma_sq_p + sigma_sq_a + 
+                             2*epred_tmp*sigma_p_a);
       dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
       epred[i] = normal_lb_rng(epred_tmp, sigma_tmp_e, 0.0);
       if(bloq_obs[i] == 1){
@@ -428,3 +430,4 @@ generated quantities{
     }
   }
 }
+
