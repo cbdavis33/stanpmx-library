@@ -1,9 +1,3 @@
----
-editor_options: 
-  markdown: 
-    wrap: 80
----
-
 # A Library of Stan Models and R Scripts for PMx
 
 Note: The workflow is a little out-of-date for most of these repositories. As of
