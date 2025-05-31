@@ -34,7 +34,7 @@ functions{
     return result;
   }
   
-  vector find_between_vec(int lb, int ub, array[] int idx, vector y) {
+  vector find_between(int lb, int ub, array[] int idx, vector y) {
     
     vector[num_between(lb, ub, idx)] result;
     int n = 1;
@@ -70,8 +70,8 @@ functions{
     array[n_obs_slice] int i_obs_slice = find_between(subj_start[start], 
                                                       subj_end[end], i_obs);
                                                 
-    vector[n_obs_slice] dv_obs_slice = find_between_vec(start, end, 
-                                                        dv_obs_id, dv_obs);
+    vector[n_obs_slice] dv_obs_slice = find_between(start, end, 
+                                                    dv_obs_id, dv_obs);
     
     vector[n_obs_slice] ipred_slice;
     
