@@ -158,11 +158,6 @@ generated quantities{
       
       row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
       
-      CL[j] = theta_j_new[1];
-      VC[j] = theta_j_new[2];
-      KA[j] = theta_j_new[3];
-      KE[j] = CL[j]/VC[j];
-      
       CL[j] = theta_j_new[1] * wt_adjustment_cl * egfr_adjustment_cl;
       VC[j] = theta_j_new[2] * wt_adjustment_vc * race_adjustment_vc;
       KA[j] = theta_j_new[3] * cmppi_adjustment_ka;
