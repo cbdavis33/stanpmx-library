@@ -7,14 +7,14 @@ library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.csv",
+nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_covariates.csv",
                         na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq), # This value can be anything except NA. It'll be indexed away 
-         cmt = 1) 
+         cmt = 1)
 
 ## Summary of BLOQ values
 nonmem_data %>%
@@ -84,17 +84,25 @@ wt <- nonmem_data %>%
   ungroup() %>% 
   pull(wt)
 
-race_asian <- nonmem_data %>% 
+sexf <- nonmem_data %>% 
   group_by(ID) %>% 
-  distinct(race_asian) %>% 
+  distinct(sexf) %>% 
   ungroup() %>% 
-  pull(race_asian)
+  pull(sexf)
 
 egfr <- nonmem_data %>% 
   group_by(ID) %>% 
   distinct(egfr) %>% 
   ungroup() %>% 
   pull(egfr)
+
+race <- nonmem_data %>% 
+  group_by(ID) %>% 
+  distinct(race) %>% 
+  ungroup() %>% 
+  pull(race)
+
+n_races <- length(unique(race))
 
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
@@ -112,11 +120,13 @@ stan_data <- list(n_subjects = n_subjects,
                   dv = nonmem_data$DV,
                   subj_start = subj_start,
                   subj_end = subj_end,
-                  wt = wt,
-                  race_asian = race_asian,
-                  egfr = egfr,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
+                  wt = wt,
+                  sex = sexf,
+                  egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   location_tvcl = 0.25,
                   location_tvvc = 3,
                   location_tvq = 1,
@@ -134,7 +144,7 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Fit/iv_2cmt_ppa_covariates.stan",
@@ -150,23 +160,27 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "ppa_covariates",
-                    init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                           TVVC = rlnorm(1, log(3), 0.3),
-                                           TVQ = rlnorm(1, log(1), 0.3),
+                    # output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
+                    # output_basename = "ppa",
+                    init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                                           TVVC = rlnorm(1, log(4), 0.3),
+                                           TVQ = rlnorm(1, log(0.75), 0.3),
                                            TVVP = rlnorm(1, log(4), 0.3),
-                                           theta_cl_wt = rnorm(1), 
-                                           theta_vc_wt = rnorm(1), 
-                                           theta_q_wt = rnorm(1), 
-                                           theta_vp_wt = rnorm(1), 
-                                           theta_vc_race_asian = rnorm(1), 
-                                           theta_cl_egfr = rnorm(1),
+                                           theta_cl_wt = rnorm(1, 0, 0.2),
+                                           theta_vc_wt = rnorm(1, 0, 0.2),
+                                           theta_q_wt = rnorm(1, 0, 0.2),
+                                           theta_vp_wt = rnorm(1, 0, 0.2),
+                                           theta_vc_sex = rnorm(1, 0, 0.2),
+                                           theta_cl_egfr = rnorm(1, 0, 0.2),
+                                           theta_vc_race2 = rnorm(1, 0, 0.2),
+                                           theta_vc_race3 = rnorm(1, 0, 0.2),
+                                           theta_vc_race4 = rnorm(1, 0, 0.2),
                                            omega = rlnorm(4, log(0.3), 0.3),
                                            sigma = rlnorm(2, log(0.4), 0.3)))
 
 fit$save_object("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_ppa_covariates.rds")
 
 fit$save_data_file(dir = "iv_2cmt_linear_covariates/Stan/Fits/Stan_Data",
-                   basename = "ppa_covariates", timestamp = FALSE, random = FALSE)
+                   basename = "ppa_covariates", 
+                   timestamp = FALSE, random = FALSE)
 

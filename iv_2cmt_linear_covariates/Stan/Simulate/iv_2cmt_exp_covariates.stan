@@ -1,12 +1,13 @@
 // IV infusion
-// Two-compartment PK Model
+// One-compartment PK Model
 // IIV on CL, VC, Q, and VP (full covariance matrix)
 // exponential error - DV = IPRED*exp(eps)
 // Any of analytical, matrix-exponential, or general ODE solution using Torsten
 // Covariates: 
-//   1) Body Weight on CL, VC, Q, VP - (wt/70)^theta
-//   2) Race = Asian on VC (0/1) - exp(theta*race_asian)
+//   1) Body Weight on CL, VC, Q, and VP - (wt/70)^theta
+//   2) Sex on VC (0 = male, 1 = female) - exp(theta*sex)
 //   3) eGFR on CL (continuous) - (eGFR/90)^theta
+//   4) Race on VC - exp(theta_vc_{race}*I(race == {race}))
 
 functions{
   
@@ -48,9 +49,12 @@ data{
   array[n_subjects] int subj_start;
   array[n_subjects] int subj_end;
   
-  array[n_subjects] real<lower = 0> wt;                   // baseline bodyweight (kg)
-  array[n_subjects] int<lower = 0, upper = 1> race_asian; // race = Asian
-  array[n_subjects] real<lower = 0> egfr;                 // eGFR
+  array[n_subjects] real<lower = 0> wt;                    // baseline bodyweight (kg)
+  array[n_subjects] int<lower = 0, upper = 1> sex;         // sex
+  array[n_subjects] real<lower = 0> egfr;                  // eGFR
+  int<lower = 2> n_races;                                  // number of unique races
+  array[n_subjects] int<lower = 1, upper = n_races> race;  // race
+
   
   real<lower = 0> TVCL;
   real<lower = 0> TVVC;
@@ -62,16 +66,19 @@ data{
   real<lower = 0> omega_q;
   real<lower = 0> omega_vp;
   
-  real theta_cl_wt;         // allometric scaling coefficient for wt on clearance
-  real theta_vc_wt;         // allometric scaling coefficient for wt on VC
-  real theta_q_wt;          // allometric scaling coefficient for wt on Q
-  real theta_vp_wt;         // allometric scaling coefficient for wt on VP
-  real theta_vc_race_asian; // effect of race (asian) on VC 
-  real theta_cl_egfr;       // effect of eGFR on clearance
+  real theta_cl_wt;    // allometric scaling coefficient for wt on clearance
+  real theta_vc_wt;    // allometric scaling coefficient for wt on VC
+  real theta_q_wt;     // allometric scaling coefficient for wt on Q
+  real theta_vp_wt;    // allometric scaling coefficient for wt on VP
+  real theta_vc_sex;   // effect of sex on VC 
+  real theta_cl_egfr;  // effect of eGFR on clearance
+  real theta_vc_race2; // effect of race == 2 relative to race == 1 on VC
+  real theta_vc_race3; // effect of race == 3 relative to race == 1 on VC
+  real theta_vc_race4; // effect of race == 4 relative to race == 1 on VC
   
   corr_matrix[4] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
-                     // cor_cl_vc, cor_cl_q, ... and then construct the 
+                     // cor_cl_vc and then construct the 
                      // correlation matrix in transformed data like is done with
                      // R_Sigma, but it's easy enough to do in R
   
@@ -85,10 +92,13 @@ transformed data{
   int n_random = 4;
   int n_cmt = (solver == 1) ? 3 : 2;
   
+  vector[n_races] theta_vc_race = [0, theta_vc_race2, theta_vc_race3, 
+                                   theta_vc_race4]'; 
+  
   vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-
+  
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding, but could be data or a parameter in another situation
   
@@ -120,6 +130,11 @@ generated quantities{
                                            diag_pre_multiply(omega, L));
     }
     theta = (rep_matrix(typical_values, n_subjects) .* exp(eta))';
+
+    CL = col(theta, 1);
+    VC = col(theta, 2);
+    Q = col(theta, 3);
+    VP = col(theta, 4);
     
     for(j in 1:n_subjects){
       
@@ -128,12 +143,13 @@ generated quantities{
       real wt_adjustment_vc = wt_over_70^theta_vc_wt;
       real wt_adjustment_q = wt_over_70^theta_q_wt;
       real wt_adjustment_vp = wt_over_70^theta_vp_wt;
-      real race_asian_adjustment_vc = exp(theta_vc_race_asian*race_asian[j]);
+      real sex_adjustment_vc = exp(theta_vc_sex*sex[j]);
       real egfr_adjustment_cl = (egfr[j]/90)^theta_cl_egfr;
+      real race_adjustment_vc = exp(theta_vc_race[race[j]]);
       
       row_vector[n_random] theta_j = theta[j]; // access the parameters for subject j
       CL[j] = theta_j[1] * wt_adjustment_cl * egfr_adjustment_cl;
-      VC[j] = theta_j[2] * wt_adjustment_vc * race_asian_adjustment_vc;
+      VC[j] = theta_j[2] * wt_adjustment_vc * race_adjustment_vc * sex_adjustment_vc;
       Q[j] = theta_j[3] * wt_adjustment_q;
       VP[j] = theta_j[4] * wt_adjustment_vp;
       
@@ -205,4 +221,5 @@ generated quantities{
     }
   }
 }
+
 

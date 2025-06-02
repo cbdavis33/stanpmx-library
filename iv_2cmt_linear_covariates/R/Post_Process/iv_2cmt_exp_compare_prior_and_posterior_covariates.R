@@ -1,6 +1,7 @@
 rm(list = ls())
 cat("\014")
 
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -26,19 +27,21 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
+                       init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
                                               TVVC = rlnorm(1, log(3), 0.3),
                                               TVQ = rlnorm(1, log(1), 0.3),
                                               TVVP = rlnorm(1, log(4), 0.3),
-                                              theta_cl_wt = rnorm(1), 
-                                              theta_vc_wt = rnorm(1), 
-                                              theta_q_wt = rnorm(1), 
-                                              theta_vp_wt = rnorm(1), 
-                                              theta_vc_race_asian = rnorm(1), 
-                                              theta_cl_egfr = rnorm(1),
+                                              theta_cl_wt = rnorm(1, 0, 0.2),
+                                              theta_vc_wt = rnorm(1, 0, 0.2),
+                                              theta_q_wt = rnorm(1, 0, 0.2),
+                                              theta_vp_wt = rnorm(1, 0, 0.2),
+                                              theta_vc_sex = rnorm(1, 0, 0.2),
+                                              theta_cl_egfr = rnorm(1, 0, 0.2),
+                                              theta_vc_race2 = rnorm(1, 0, 0.2),
+                                              theta_vc_race3 = rnorm(1, 0, 0.2),
+                                              theta_vc_race4 = rnorm(1, 0, 0.2),
                                               omega = rlnorm(4, log(0.3), 0.3),
-                                              sigma = rlnorm(1, log(0.2), 0.3)))
-
+                                              sigma_p = rlnorm(1, log(0.2), 0.3)))
 
 fit <- read_rds("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_exp_covariates.rds")
 
@@ -51,7 +54,7 @@ parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              "sigma")
 
 draws_all_df <- priors$draws(format = "draws_df") %>% 
-  mutate(target = "prior") %>%
+  mutate(target = "prior") %>% 
   bind_rows(draws_df %>% 
               mutate(target = "posterior")) %>% 
   select(all_of(parameters_to_summarize), target) %>% 
@@ -73,16 +76,21 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 (target_comparison_covariates <- draws_all_df %>% 
     filter(str_detect(variable, "theta_")) %>% 
     mutate(variable = factor(variable, 
-                             levels = c("theta_cl_wt", "theta_vc_wt",
+                             levels = c("theta_cl_wt", "theta_vc_wt", 
                                         "theta_q_wt", "theta_vp_wt",
-                                        "theta_vc_race_asian", "theta_cl_egfr")),
+                                        "theta_vc_sex", "theta_cl_egfr",
+                                        "theta_vc_race2", "theta_vc_race3", 
+                                        "theta_vc_race4")),
            variable = fct_recode(variable, 
                                  "theta[CL[WT]]" = "theta_cl_wt",
                                  "theta[VC[WT]]" = "theta_vc_wt",
                                  "theta[Q[WT]]" = "theta_q_wt",
                                  "theta[VP[WT]]" = "theta_vp_wt",
-                                 "theta[VC[ASIAN]]" = "theta_vc_race_asian",
-                                 "theta[CL[eGFR]]" = "theta_cl_egfr")) %>% 
+                                 "theta[VC[SEX]]" = "theta_vc_sex",
+                                 "theta[CL[eGFR]]" = "theta_cl_egfr",
+                                 "theta[VC[RACE2]]" = "theta_vc_race2",
+                                 "theta[VC[RACE3]]" = "theta_vc_race3",
+                                 "theta[VC[RACE4]]" = "theta_vc_race4")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -109,9 +117,11 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 
 (target_comparison_cor <- draws_all_df %>% 
     filter(str_detect(variable, "cor_")) %>% 
-    mutate(variable = factor(variable, 
-                             levels = c("cor_cl_vc", "cor_cl_q", "cor_cl_vp",
-                                        "cor_vc_q", "cor_vc_vp", "cor_q_vp")),
+    mutate(variable = 
+             factor(variable, 
+                    levels = c("cor_cl_vc", "cor_cl_q", "cor_cl_vp",
+                               "cor_vc_q", "cor_vc_vp",
+                               "cor_q_vp")),
            variable = fct_recode(variable, 
                                  "rho[paste(CL, ', ', VC)]" = "cor_cl_vc",
                                  "rho[paste(CL, ', ', Q)]" = "cor_cl_q",
@@ -125,7 +135,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     scale_fill_manual(name = "Distribution",
                       values = c("prior" = "blue", "posterior" = "red")) +
     theme(legend.position = "bottom") +
-    facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
+    facet_wrap(~ variable, scales = "free", nrow = 2, labeller = label_parsed))
 
 
 (target_comparison_sigma <- draws_all_df %>% 
