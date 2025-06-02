@@ -5,7 +5,7 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
-library(vpc)
+library(npde)
 library(patchwork)
 library(tidyverse)
 
@@ -21,6 +21,11 @@ nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_ppa_covariates.c
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq), # This value can be anything except NA. It'll be indexed away 
          cmt = 1)
+
+# NPDEs can be done two ways, and they're the same up to Monte Carlo error
+#   1) Use the _predict_new_subjects_covariates.stan file 
+#   2) Use the fitted object that already has already done everything in
+#        generated quantities
 
 new_data <- nonmem_data %>% 
   arrange(ID, time, evid) %>% 
@@ -50,17 +55,25 @@ wt <- nonmem_data %>%
   ungroup() %>% 
   pull(wt)
 
-race_asian <- nonmem_data %>% 
+sexf <- nonmem_data %>% 
   group_by(ID) %>% 
-  distinct(race_asian) %>% 
+  distinct(sexf) %>% 
   ungroup() %>% 
-  pull(race_asian)
+  pull(sexf)
 
 egfr <- nonmem_data %>% 
   group_by(ID) %>% 
   distinct(egfr) %>% 
   ungroup() %>% 
   pull(egfr)
+
+race <- nonmem_data %>% 
+  group_by(ID) %>% 
+  distinct(race) %>% 
+  ungroup() %>% 
+  pull(race)
+
+n_races <- length(unique(race))
 
 stan_data <- list(n_subjects = n_subjects,
                   n_subjects_new = n_subjects,
@@ -76,10 +89,13 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   wt = wt,
-                  race_asian = race_asian,
+                  sex = sexf,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   t_1 = 70,
-                  t_2 = 84)
+                  t_2 = 84,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Predict/iv_2cmt_ppa_predict_new_subjects_covariates.stan")
@@ -91,17 +107,12 @@ preds <- model$generate_quantities(fit,
 
 preds_df <- preds$draws(format = "draws_df")
 
-preds_col <- preds_df %>% 
-  spread_draws(pred[i]) %>% 
-  summarize(pred_mean = mean(pred)) %>% 
-  ungroup() %>% 
-  bind_cols(new_data %>% 
-              select(ID, time, evid, race_asian)) %>% 
+data_obs <- nonmem_data %>% 
   filter(evid == 0) %>% 
-  select(ID, time, race_asian, pred_mean, -i)
+  mutate(DV = if_else(bloq == 1, lloq, DV)) 
 
-sim <- preds_df %>%
-  spread_draws(ipred[i], dv[i]) %>% 
+simdata <- preds_df %>%
+  spread_draws(epred[i]) %>% 
   ungroup() %>% 
   mutate(ID = new_data$ID[i],
          time = new_data$time[i],
@@ -109,129 +120,142 @@ sim <- preds_df %>%
          evid = new_data$evid[i],
          bloq = new_data$bloq[i]) %>% 
   filter(evid == 0) %>%
-  mutate(dv = if_else(bloq == 1, 0, dv)) %>% 
-  select(ID, sim = ".draw", time, ipred, dv) %>% 
-  arrange(ID, sim, time) %>% 
-  left_join(preds_col, by = c("ID", "time"))
+  arrange(.draw, ID, time) 
 
-obs <- nonmem_data %>% 
-  select(ID, time, dv = "DV", amt, evid, mdv, bloq) %>% 
+my_npde <- autonpde(data_obs %>% 
+                      filter(evid == 0) %>% 
+                      select(ID, amt, time, DV), 
+                    simdata %>% 
+                      select(ID, time, epred), 
+                    1, 3, 4, boolsave = FALSE, cens.method = "cdf")
+
+results_npde <- data_obs %>% 
+  select(ID, lloq, bloq, time, DV) %>% 
+  bind_cols(my_npde@results@res %>% 
+              tibble() %>% 
+              rename(ewres = ydobs) %>% 
+              select(ypred, ycomp, ewres, npde))
+
+# NPDE density plot
+results_npde %>% 
+  ggplot() + 
+  geom_density(aes(x = npde), fill = "gray") + 
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1),
+                color = "red", size = 1) +
+  scale_x_continuous(name = "NPDE") +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank())
+
+# NPDE vs. Population Prediction
+results_npde %>% 
+  ggplot(aes(x = ypred, y = npde)) +
+  geom_point() +
+  scale_x_continuous(name = "Population Prediction (EPRED)") +
+  scale_y_continuous(name = "NPDE") +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
+  geom_hline(aes(yintercept = qnorm(0.025)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_hline(aes(yintercept = qnorm(0.975)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.25) +
+  theme_bw()
+
+# NPDE vs. Time
+results_npde %>% 
+  ggplot(aes(x = time, y = npde)) +
+  geom_point() +
+  scale_x_continuous(name = "Time (d)") +
+  scale_y_continuous(name = "NPDE") +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
+  geom_hline(aes(yintercept = qnorm(0.025)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_hline(aes(yintercept = qnorm(0.975)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.25) +
+  theme_bw()
+
+
+## Alternatively, use the output in the fitted object
+
+draws_df <- fit$draws(format = "draws_df")
+
+data_obs <- nonmem_data %>% 
   filter(evid == 0) %>% 
-  mutate(dv = if_else(bloq == 1, 0, dv)) %>% 
-  left_join(preds_col, by = c("ID", "time"))
+  mutate(DV = if_else(bloq == 1, lloq, DV)) 
 
-(p_vpc <- vpc(sim = sim, obs = obs,
-              sim_cols = list(idv = "time",
-                              dv = "dv",
-                              id = "ID",
-                              pred = "pred",
-                              sim = "sim"),
-              obs_cols = list(dv = "dv",
-                              idv = "time",
-                              id = "ID",
-                              pred = "pred"),
-              show = list(obs_dv = TRUE, 
-                          obs_ci = TRUE,
-                          pi = TRUE,
-                          pi_as_area = FALSE,
-                          pi_ci = TRUE,
-                          obs_median = TRUE,
-                          sim_median = TRUE,
-                          sim_median_ci = TRUE),
-              log_y = TRUE,
-              lloq = 1) +
-    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
-    #                    trans = "identity") +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
-    theme_bw())
+simdata <- draws_df %>%
+  spread_draws(epred[i]) %>% 
+  ungroup() %>% 
+  mutate(ID = data_obs$ID[data_obs$evid == 0][i],
+         time = data_obs$time[data_obs$evid == 0][i]) %>% 
+  left_join(data_obs %>% 
+              filter(evid == 0) %>%
+              select(ID, time, DV), 
+            by = c("ID", "time")) %>%
+  select(ID, time, everything()) %>% 
+  arrange(.draw, ID, time)
 
-(p_pcvpc <- vpc(sim = sim, obs = obs,
-                sim_cols = list(idv = "time",
-                                dv = "dv",
-                                id = "ID",
-                                pred = "pred_mean",
-                                sim = "sim"),
-                obs_cols = list(dv = "dv",
-                                idv = "time",
-                                id = "ID",
-                                pred = "pred_mean"),
-                pred_corr = TRUE,
-                show = list(obs_dv = TRUE, 
-                            obs_ci = TRUE,
-                            pi = TRUE,
-                            pi_as_area = FALSE,
-                            pi_ci = TRUE,
-                            obs_median = TRUE,
-                            sim_median = TRUE,
-                            sim_median_ci = TRUE),
-                log_y = TRUE) +
-    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
-    #                    trans = "log10") +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
-    theme_bw())
+my_npde <- autonpde(data_obs %>% 
+                      filter(evid == 0) %>% 
+                      select(ID, amt, time, DV), 
+                    simdata %>% 
+                      select(ID, time, epred), 
+                    1, 3, 4, boolsave = FALSE, cens.method = "cdf")
 
-p_vpc + 
-  p_pcvpc
+results_npde <- data_obs %>% 
+  select(ID, lloq, bloq, time, DV) %>% 
+  bind_cols(my_npde@results@res %>% 
+              tibble() %>% 
+              rename(ewres = ydobs) %>% 
+              select(ypred, ycomp, ewres, npde))
 
-(p_vpc_race_asian <- vpc(sim = sim, obs = obs,
-                         sim_cols = list(idv = "time",
-                                         dv = "dv",
-                                         id = "ID",
-                                         pred = "pred",
-                                         sim = "sim"),
-                         obs_cols = list(dv = "dv",
-                                         idv = "time",
-                                         id = "ID",
-                                         pred = "pred"),
-                         show = list(obs_dv = TRUE,
-                                     obs_ci = TRUE,
-                                     pi = TRUE,
-                                     pi_as_area = FALSE,
-                                     pi_ci = TRUE,
-                                     obs_median = TRUE,
-                                     sim_median = TRUE,
-                                     sim_median_ci = TRUE),
-                         log_y = TRUE,
-                         stratify = "race_asian",
-                         lloq = 1) +
-    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
-    #                    trans = "identity") +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
-    theme_bw())
+# NPDE density plot
+results_npde %>% 
+  ggplot() + 
+  geom_density(aes(x = npde), fill = "gray") + 
+  stat_function(fun = dnorm, args = list(mean = 0, sd = 1),
+                color = "red", size = 1) +
+  scale_x_continuous(name = "NPDE") +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank())
 
-(p_pcvpc_race_asian <- vpc(sim = sim, obs = obs,
-                           sim_cols = list(idv = "time",
-                                           dv = "dv",
-                                           id = "ID",
-                                           pred = "pred_mean",
-                                           sim = "sim"),
-                           obs_cols = list(dv = "dv",
-                                           idv = "time",
-                                           id = "ID",
-                                           pred = "pred_mean"),
-                           pred_corr = TRUE,
-                           show = list(obs_dv = TRUE, 
-                                       obs_ci = TRUE,
-                                       pi = TRUE,
-                                       pi_as_area = FALSE,
-                                       pi_ci = TRUE,
-                                       obs_median = TRUE,
-                                       sim_median = TRUE,
-                                       sim_median_ci = TRUE),
-                           stratify = "race_asian",
-                           log_y = TRUE) +
-    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
-    #                    trans = "log10") +
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168, by = 24)) +
-    theme_bw())
+# NPDE vs. Population Prediction
+results_npde %>% 
+  ggplot(aes(x = ypred, y = npde)) +
+  geom_point() +
+  scale_x_continuous(name = "Population Prediction (EPRED)") +
+  scale_y_continuous(name = "NPDE") +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
+  geom_hline(aes(yintercept = qnorm(0.025)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_hline(aes(yintercept = qnorm(0.975)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.25) +
+  theme_bw()
 
-p_vpc_race_asian + 
-  p_pcvpc_race_asian
+# NPDE vs. Time
+results_npde %>% 
+  ggplot(aes(x = time, y = npde)) +
+  geom_point() +
+  scale_x_continuous(name = "Time (h)") +
+  scale_y_continuous(name = "NPDE") +
+  geom_hline(yintercept = 0, color = "blue", linewidth = 1.5) +
+  geom_hline(aes(yintercept = qnorm(0.025)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_hline(aes(yintercept = qnorm(0.975)), 
+             linetype = "dashed", color = "blue",
+             linewidth = 1.25) +
+  geom_smooth(se = FALSE, color = "red", linewidth = 1.25) +
+  theme_bw()
+

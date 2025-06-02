@@ -5,7 +5,6 @@ library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
-library(mrgsolve)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -18,33 +17,25 @@ nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.
   rename(ID = "id",
          DV = "dv") %>% 
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
-         bloq = if_else(is.na(bloq), -999, bloq)) # This value can be anything except NA. It'll be indexed away 
+         bloq = if_else(is.na(bloq), -999, bloq), # This value can be anything except NA. It'll be indexed away 
+         cmt = 1)
 
 # For this example, let's simulate individuals with various covariates at 400 mg
-# Q2W and 800 mg Q4W
 data_new_covariates <- expand_grid(wt = c(50, 70, 90), 
-                                   race_asian = c(0, 1), 
-                                   egfr = c(15, 30, 60, 90)) %>% 
+                                   sexf = c(0, 1), 
+                                   egfr = c(15, 30, 60, 90),
+                                   race = 1:4) %>% 
   mutate(ID = 1:n()) %>% 
   relocate(ID, .before = 1)
 
-dosing_data_q2w <- mrgsolve::expand.ev(ID = data_new_covariates %>% 
-                                         pull(ID),
-                                       addl = 5, ii = 14, cmt = 1, amt = 400, 
-                                       ss = 0, tinf = 1/24, evid = 1) %>%
+dosing_data <- mrgsolve::expand.ev(ID = data_new_covariates %>% 
+                                     pull(ID),
+                                   addl = 5, ii = 14, cmt = 1, 
+                                   amt = 400, 
+                                   tinf = 1/24, evid = 1, mdv = 1) %>%
   as_tibble() %>% 
+  mutate(ss = 0) %>% 
   select(ID, time, everything())
-
-dosing_data_q4w <- mrgsolve::expand.ev(ID = data_new_covariates %>% 
-                                         pull(ID),
-                                       addl = 2, ii = 28, cmt = 1, amt = 800, 
-                                       ss = 0, tinf = 1/24, evid = 1) %>%
-  as_tibble() %>% 
-  mutate(ID = ID + max(data_new_covariates$ID)) %>% 
-  select(ID, time, everything())
-
-dosing_data <- dosing_data_q2w %>% 
-  bind_rows(dosing_data_q4w)
 
 end_inf_times <- dosing_data %>% 
   realize_addl() %>% 
@@ -61,28 +52,22 @@ t1 <- dosing_data %>%
 times_new <- tibble(time = sort(unique(c(t1, end_inf_times, 
                                          seq(0, 84, by = 12/24)))))
 
-new_data <- bind_rows(replicate(max(dosing_data$ID), times_new,
-                                simplify = FALSE)) %>%
+new_data <- bind_rows(replicate(max(dosing_data$ID), times_new, 
+                                simplify = FALSE)) %>% 
   mutate(ID = rep(1:max(dosing_data$ID), each = nrow(times_new)),
-         amt = 0,
-         evid = 0,
-         rate = 0,
-         addl = 0,
-         ii = 0,
-         cmt = 2,
-         mdv = 1,
+         amt = 0, 
+         evid = 0, 
+         rate = 0, 
+         addl = 0, 
+         ii = 0, 
+         cmt = 1, 
+         mdv = 1, 
          ss = 0) %>%
-  filter(time != 0) %>%
-  select(ID, time, everything()) %>%
-  bind_rows(dosing_data) %>%
-  arrange(ID, time) %>%
-  left_join(data_new_covariates %>%
-              mutate(regimen = "400 mg Q2W") %>%
-              bind_rows(data_new_covariates %>%
-                          mutate(ID = ID + max(data_new_covariates$ID),
-                                 regimen = "800 mg Q4W")),
-            by = "ID")
-
+  filter(time != 0) %>% 
+  select(ID, time, everything()) %>% 
+  bind_rows(dosing_data) %>% 
+  arrange(ID, time) %>% 
+  left_join(data_new_covariates, by = "ID")
 
 # number of individuals in the original dataset
 n_subjects <- fit$metadata()$stan_variable_sizes$Z[2]
@@ -110,17 +95,25 @@ wt <- new_data %>%
   ungroup() %>% 
   pull(wt)
 
-race_asian <- new_data %>% 
+sexf <- new_data %>% 
   group_by(ID) %>% 
-  distinct(race_asian) %>% 
+  distinct(sexf) %>% 
   ungroup() %>% 
-  pull(race_asian)
+  pull(sexf)
 
 egfr <- new_data %>% 
   group_by(ID) %>% 
   distinct(egfr) %>% 
   ungroup() %>% 
   pull(egfr)
+
+race <- new_data %>% 
+  group_by(ID) %>% 
+  distinct(race) %>% 
+  ungroup() %>% 
+  pull(race)
+
+n_races <- length(unique(race))
 
 stan_data <- list(n_subjects = n_subjects,
                   n_subjects_new = n_subjects_new,
@@ -136,21 +129,19 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   wt = wt,
-                  race_asian = race_asian,
+                  sex = sexf,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   t_1 = 70,
-                  t_2 = 84)
+                  t_2 = 84,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Predict/iv_2cmt_prop_predict_new_subjects_covariates.stan")
 
-# preds <- model$generate_quantities(fit,
-#                                    data = stan_data,
-#                                    parallel_chains = 4,
-#                                    seed = 1234) 
-
 preds <- model$generate_quantities(fit$draws() %>%
-                                     thin_draws(100),
+                                     thin_draws(1),
                                    data = stan_data,
                                    parallel_chains = 4,
                                    seed = 1234)
@@ -158,88 +149,139 @@ preds <- model$generate_quantities(fit$draws() %>%
 preds_df <- preds$draws(format = "draws_df")
 
 post_preds_summary <- preds_df %>%
-  spread_draws(ipred[i], pred[i], dv[i]) %>%
-  median_qi(ipred, pred, dv) %>%
+  spread_draws(c(epred_stan, epred)[i]) %>%
+  median_qi(epred_stan, epred) %>%
   mutate(ID = new_data$ID[i],
          time = new_data$time[i],
          wt = factor(new_data$wt[i]),
-         race_asian = factor(new_data$race_asian[i]),
+         sexf = factor(new_data$sexf[i]),
          egfr = factor(new_data$egfr[i]),
-         regimen = factor(new_data$regimen[i])) %>%
-  select(ID, time, everything(), -i)
+         race = factor(new_data$race[i])) %>% 
+  select(ID, time, everything(), -i) 
 
-(p_wt <- ggplot(post_preds_summary %>%
-                  filter(race_asian == 0, egfr == 90),
+(p_wt <- ggplot(post_preds_summary %>% 
+                  filter(sexf == 0, egfr == 90), 
                 aes(x = time, group = ID)) +
-    geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper, fill = wt),
-                alpha = 0.25, show.legend = FALSE) +
-    geom_line(aes(y = ipred, color = wt), linetype = 1, linewidth = 1.15) +
+    geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, 
+                        ymax = epred_stan.upper, fill = wt, color = wt),
+                    linewidth = 1.15,
+                    alpha = 0.25, show.legend = TRUE) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10",
                        limits = c(NA, NA)) +
     scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, max(new_data$time), by = 14),
-                       labels = seq(0, max(new_data$time), by = 14),
-                       limits = c(0, max(new_data$time))) +
+                       breaks = seq(0, 84, by = 7),
+                       labels = seq(0, 84, by = 7),
+                       limits = c(0, 84)) +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           legend.position = "bottom") +
     scale_color_manual(name = "Weight (kg)",
-                       values = c("50" = "blue", "70" = "red",
+                       values = c("50" = "blue", "70" = "red", 
                                   "90" = "green")) +
     scale_fill_manual(name = "Weight (kg)",
-                      values = c("50" = "blue", "70" = "red",
+                      values = c("50" = "blue", "70" = "red", 
                                  "90" = "green")) +
-    facet_wrap(~regimen))
+    facet_wrap(~race, labeller = label_both))
 
-(p_race_asian <- ggplot(post_preds_summary %>%
-                          filter(wt == 70, egfr == 90),
-                        aes(x = time, group = ID)) +
-    geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper, fill = race_asian),
-                alpha = 0.25, show.legend = FALSE) +
-    geom_line(aes(y = ipred, color = race_asian), linetype = 1,
-              linewidth = 1.15) +
+(p_sex <- ggplot(post_preds_summary %>% 
+                   filter(wt == 70, egfr == 90), 
+                 aes(x = time, group = ID)) +
+    geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, 
+                        ymax = epred_stan.upper, fill = sexf, color = sexf),
+                    linewidth = 1.15,
+                    alpha = 0.25, show.legend = TRUE) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10",
                        limits = c(NA, NA)) +
     scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, max(new_data$time), by = 14),
-                       labels = seq(0, max(new_data$time), by = 14),
-                       limits = c(0, max(new_data$time))) +
+                       breaks = seq(0, 84, by = 7),
+                       labels = seq(0, 84, by = 7),
+                       limits = c(0, 84)) +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           legend.position = "bottom") +
-    scale_color_manual(name = "Asian",
+    scale_color_manual(name = "Sex",
                        values = c("0" = "blue", "1" = "red"),
-                       labels = c("0" = "No", "1" = "Yes")) +
-    scale_fill_manual(name = "Asian",
+                       labels = c("0" = "Male", "1" = "Female")) +
+    scale_fill_manual(name = "Sex",
                       values = c("0" = "blue", "1" = "red"),
-                      labels = c("0" = "No", "1" = "Yes")) +
-    facet_wrap(~regimen))
+                      labels = c("0" = "Male", "1" = "Female")) +
+    facet_wrap(~race, labeller = label_both))
 
-(p_egfr <- ggplot(post_preds_summary %>%
-                    filter(race_asian == 0, wt == 70),
+(p_egfr <- ggplot(post_preds_summary %>% 
+                    filter(sexf == 0, wt == 70), 
                   aes(x = time, group = ID)) +
-    geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper, fill = egfr),
-                alpha = 0.25, show.legend = FALSE) +
-    geom_line(aes(y = ipred, color = egfr), linetype = 1, linewidth = 1.15) +
+    geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, 
+                        ymax = epred_stan.upper, fill = egfr, color = egfr),
+                    linewidth = 1.15,
+                    alpha = 0.25, show.legend = TRUE) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10",
                        limits = c(NA, NA)) +
     scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, max(new_data$time), by = 14),
-                       labels = seq(0, max(new_data$time), by = 14),
-                       limits = c(0, max(new_data$time))) +
+                       breaks = seq(0, 84, by = 7),
+                       labels = seq(0, 84, by = 7),
+                       limits = c(0, 84)) +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
           legend.position = "bottom") +
-    scale_color_manual(name = latex2exp::TeX("$eGFR \\; (mL/min/1.73 m^2)$"),
+    scale_color_manual(name = latex2exp::TeX("$eGFR\\;(mL/min/1.73 m^2)$"),
                        values = c("15" = "blue", "30" = "red",
                                   "60" = "green", "90" = "black")) +
     scale_fill_manual(name = latex2exp::TeX("$eGFR\\;(mL/min/1.73 m^2)$"),
                       values = c("15" = "blue", "30" = "red",
                                  "60" = "green", "90" = "black")) +
-    facet_wrap(~regimen))
+    facet_wrap(~race, labeller = label_both))
+
+## Individual estimates (posterior median)
+est_ind <- if(stan_data$want_auc_cmax){
+  preds_df %>%
+    spread_draws(c(CL, VC, Q, VP, 
+                   auc_ss, t_half_alpha, t_half_terminal)[ID]) %>% 
+    median_qi() %>% 
+    select(ID, CL, VC, Q, VP, 
+           auc_ss, t_half_alpha, t_half_terminal) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time %in% c(70 + 1/24, 84)) %>% 
+                 mutate(time = round(time, 0)) %>% 
+                 select(ID, time, epred_stan) %>%
+                 pivot_wider(values_from = epred_stan, names_from = time, 
+                             names_prefix = "time") %>%
+                 rename(c_trough = time84,
+                        c_max = time70) %>% 
+                 distinct(),
+               by = "ID") %>% 
+  left_join(new_data %>% 
+              filter(evid == 1) %>%
+              distinct(ID, amt, race, wt, sexf, egfr),
+            by = "ID") %>% 
+    select(ID, amt, race, wt, sexf, egfr, everything())
+}else{
+  preds_df %>%
+    spread_draws(c(CL, VC, Q, VP)[ID]) %>% 
+    median_qi() %>% 
+    select(ID, CL, VC, Q, VP) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time %in% c(70 + 1/24, 84)) %>% 
+                 mutate(time = round(time, 0)) %>% 
+                 select(ID, time, epred_stan) %>%
+                 pivot_wider(values_from = epred_stan, names_from = time, 
+                             names_prefix = "time") %>%
+                 rename(c_trough = time84,
+                        c_max = time70) %>% 
+                 distinct(),
+               by = "ID") %>% 
+  left_join(new_data %>% 
+              filter(evid == 1) %>%
+              distinct(ID, amt, race, wt, sexf, egfr),
+            by = "ID") %>% 
+    select(ID, amt, race, wt, sexf, egfr, everything())
+}
+
+est_ind %>% 
+  as_tibble()
+

@@ -14,7 +14,7 @@ nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.
          DV = "dv") %>% 
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq), # This value can be anything except NA. It'll be indexed away 
-         cmt = 1) 
+         cmt = 1)
 
 ## Summary of BLOQ values
 nonmem_data %>%
@@ -126,18 +126,17 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "prop",
-                    init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                           TVVC = rlnorm(1, log(3), 0.3),
-                                           TVQ = rlnorm(1, log(1), 0.3),
+                    # output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
+                    # output_basename = "prop",
+                    init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                                           TVVC = rlnorm(1, log(4), 0.3),
+                                           TVQ = rlnorm(1, log(0.75), 0.3),
                                            TVVP = rlnorm(1, log(4), 0.3),
                                            omega = rlnorm(4, log(0.3), 0.3),
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object(
-  "iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_no_covariates.rds")
+fit$save_object("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop.rds")
 
 fit$save_data_file(dir = "iv_2cmt_linear_covariates/Stan/Fits/Stan_Data",
-                   basename = "props", timestamp = FALSE, random = FALSE)
+                   basename = "prop", timestamp = FALSE, random = FALSE)
 

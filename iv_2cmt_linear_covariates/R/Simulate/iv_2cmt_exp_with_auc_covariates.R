@@ -5,7 +5,6 @@ library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
-library(patchwork)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
@@ -19,8 +18,12 @@ theta_cl_wt <- 0.75
 theta_vc_wt <- 1
 theta_q_wt <- 0.75
 theta_vp_wt <- 1
-theta_vc_race_asian <- -0.4
+theta_vc_sex <- -0.4
 theta_cl_egfr <- 0.5
+
+theta_vc_race2 <- 0
+theta_vc_race3 <- -0.3
+theta_vc_race4 <- 0.25
 
 omega_cl <- 0.3
 omega_vc <- 0.3
@@ -32,7 +35,9 @@ R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma <- 0.2
 
-n_subjects_per_dose <- 25
+cor_p_a <- 0
+
+n_subjects_per_dose <- 40
 
 # This is an ODE, so dose into the first compartment (cmt = 1)
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 5, ii = 14, 
@@ -41,6 +46,7 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 5, ii = 14,
   as_tibble() %>% 
   rename_all(toupper) %>%
   select(ID, TIME, everything()) 
+
 
 dense_grid <- seq(0, 84*24, by = 1)/24
 
@@ -66,12 +72,11 @@ nonmem_data_simulate <- dosing_data %>%
   group_by(ID) %>% 
   mutate(SEXF = rbinom(1, 1, 0.5),
          AGE = sample(18:80, 1),
-         RACE = sample(1:4, 1),  # white = 1, black = 2, asian = 3, other = 4
+         RACE = sample(1:4, 1),
          WT = rlnorm(1, log(70), 0.15),
          EGFR = runif(1, 15, 120)) %>% 
   ungroup() %>% 
-  arrange(ID, TIME, AMT) %>% 
-  mutate(RACE_ASIAN = if_else(RACE == 3, 1, 0))
+  arrange(ID, TIME, AMT)
 
 n_subjects <- nonmem_data_simulate %>%  # number of individuals to simulate
   distinct(ID) %>% 
@@ -96,17 +101,25 @@ wt <- nonmem_data_simulate %>%
   ungroup() %>% 
   pull(WT)
 
-race_asian <- nonmem_data_simulate %>% 
+sexf <- nonmem_data_simulate %>% 
   group_by(ID) %>% 
-  distinct(RACE_ASIAN) %>% 
+  distinct(SEXF) %>% 
   ungroup() %>% 
-  pull(RACE_ASIAN)
+  pull(SEXF)
 
 egfr <- nonmem_data_simulate %>% 
   group_by(ID) %>% 
   distinct(EGFR) %>% 
   ungroup() %>% 
   pull(EGFR)
+
+race <- nonmem_data_simulate %>% 
+  group_by(ID) %>% 
+  distinct(RACE) %>% 
+  ungroup() %>% 
+  pull(RACE)
+
+n_races <- length(unique(race))
 
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
@@ -121,8 +134,10 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   wt = wt,
-                  race_asian = race_asian,
+                  sex = sexf,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   TVCL = TVCL,
                   TVVC = TVVC,
                   TVQ = TVQ,
@@ -135,37 +150,39 @@ stan_data <- list(n_subjects = n_subjects,
                   theta_vc_wt = theta_vc_wt,
                   theta_q_wt = theta_q_wt,
                   theta_vp_wt = theta_vp_wt,
-                  theta_vc_race_asian = theta_vc_race_asian,
+                  theta_vc_sex = theta_vc_sex,
                   theta_cl_egfr = theta_cl_egfr,
+                  theta_vc_race2 = theta_vc_race2,
+                  theta_vc_race3 = theta_vc_race3,
+                  theta_vc_race4 = theta_vc_race4,
                   R = R,
                   sigma = sigma,
                   t_1 = 70,
-                  t_2 = 84) 
+                  t_2 = 84)
 
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Simulate/iv_2cmt_exp_with_auc_covariates.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 31415926,
+                               seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP",
+params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", 
                                      "auc_t1_t2", 
-                                     "t_half_alpha", "t_half_terminal")) %>% 
-  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID],
-               auc_t1_t2[ID], 
-               t_half_alpha[ID], t_half_terminal[ID]) %>% 
+                                     "t_half_alpha", "t_half_terminal")) %>%
+  spread_draws(c(CL, VC, Q, VP, 
+                 auc_t1_t2, 
+                 t_half_alpha, t_half_terminal)[ID]) %>% 
   inner_join(nonmem_data_simulate %>% 
-               distinct(ID, SEXF, AGE, RACE, RACE_ASIAN, WT, EGFR),
+               distinct(ID, SEXF, AGE, RACE, WT, EGFR),
              by = "ID") %>% 
   ungroup() %>%
-  select(ID, SEXF, AGE, RACE, RACE_ASIAN, WT, EGFR, CL, VC, Q, VP,
-         auc_t1_t2, t_half_alpha, t_half_terminal)
-
+  select(ID,  SEXF, AGE, RACE, WT, EGFR, CL, VC, Q, VP, auc_t1_t2,
+         t_half_alpha, t_half_terminal)
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -174,8 +191,8 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                mutate(i = 1:n()),
              by = "i") %>%
   select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME, 
-         SEXF, AGE, RACE, RACE_ASIAN, WT, EGFR,
-         DV = "dv", IPRED = "ipred") %>% 
+         SEXF, AGE, RACE, WT, EGFR,
+         DV = "dv", IPRED = "ipred") %>%
   mutate(LLOQ = 1, 
          BLOQ = case_when(EVID == 1 ~ NA_real_,
                           DV <= LLOQ ~ 1,
@@ -200,43 +217,12 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 14),
                        labels = seq(0, max(data$TIME), by = 14),
                        limits = c(0, max(data$TIME))))
-# p_1 +
-#   facet_trelliscope(~ID, nrow = 2, ncol = 2)
-
-((params_ind %>% 
-    ggplot(aes(x = WT, y = CL)) + 
-    geom_point() + 
-    geom_smooth(method = "lm") +
-    theme_bw()) |
-    (params_ind %>% 
-       ggplot(aes(x = WT, y = VC)) + 
-       geom_point() + 
-       geom_smooth(method = "lm") +
-       theme_bw()) |
-    (params_ind %>% 
-       ggplot(aes(x = WT, y = Q)) + 
-       geom_point() + 
-       geom_smooth(method = "lm") +
-       theme_bw()) |
-    (params_ind %>% 
-       ggplot(aes(x = WT, y = VP)) + 
-       geom_point() + 
-       geom_smooth(method = "lm") +
-       theme_bw())) /
-  ((params_ind %>% 
-      ggplot(aes(x = RACE_ASIAN, y = VC, group = RACE_ASIAN)) + 
-      geom_boxplot() + 
-      theme_bw()) +
-     (params_ind %>% 
-        ggplot(aes(x = EGFR, y = CL)) + 
-        geom_point() + 
-        geom_smooth(method = "lm") +
-        theme_bw()))
 
 data %>%
   select(-IPRED) %>%
-  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_exp_covariates.csv", 
-            na = ".")
+  write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_exp_covariates.csv", na = ".")
 
 params_ind %>%
   write_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_exp_params_ind_covariates.csv")
+
+

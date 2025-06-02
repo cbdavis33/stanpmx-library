@@ -14,7 +14,7 @@ nonmem_data <- read_csv("iv_2cmt_linear_covariates/Data/iv_2cmt_prop_covariates.
          DV = "dv") %>% 
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq), # This value can be anything except NA. It'll be indexed away 
-         cmt = 1) 
+         cmt = 1)
 
 ## Summary of BLOQ values
 nonmem_data %>%
@@ -84,17 +84,25 @@ wt <- nonmem_data %>%
   ungroup() %>% 
   pull(wt)
 
-race_asian <- nonmem_data %>% 
+sexf <- nonmem_data %>% 
   group_by(ID) %>% 
-  distinct(race_asian) %>% 
+  distinct(sexf) %>% 
   ungroup() %>% 
-  pull(race_asian)
+  pull(sexf)
 
 egfr <- nonmem_data %>% 
   group_by(ID) %>% 
   distinct(egfr) %>% 
   ungroup() %>% 
   pull(egfr)
+
+race <- nonmem_data %>% 
+  group_by(ID) %>% 
+  distinct(race) %>% 
+  ungroup() %>% 
+  pull(race)
+
+n_races <- length(unique(race))
 
 stan_data <- list(n_subjects = n_subjects,
                   n_total = n_total,
@@ -115,8 +123,10 @@ stan_data <- list(n_subjects = n_subjects,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
                   wt = wt,
-                  race_asian = race_asian,
+                  sex = sexf,
                   egfr = egfr,
+                  n_races = n_races,
+                  race = race,
                   location_tvcl = 0.25,
                   location_tvvc = 3,
                   location_tvq = 1,
@@ -136,7 +146,7 @@ stan_data <- list(n_subjects = n_subjects,
                   theta_cl_wt = 0.75,
                   theta_vc_wt = 1,
                   theta_q_wt = 0.75,
-                  theta_vp_wt = 1)
+                  theta_vp_wt = 1) 
 
 model <- cmdstan_model(
   "iv_2cmt_linear_covariates/Stan/Fit/iv_2cmt_prop_covariates_fixed_allometric.stan",
@@ -152,19 +162,21 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
-                    output_basename = "prop_covariates",
-                    init = function() list(TVCL = rlnorm(1, log(0.25), 0.3),
-                                           TVVC = rlnorm(1, log(3), 0.3),
-                                           TVQ = rlnorm(1, log(1), 0.3),
+                    # output_dir = "iv_2cmt_linear_covariates/Stan/Fits/Output",
+                    # output_basename = "prop_covariates_fixed_allometric",
+                    init = function() list(TVCL = rlnorm(1, log(0.5), 0.3),
+                                           TVVC = rlnorm(1, log(4), 0.3),
+                                           TVQ = rlnorm(1, log(0.75), 0.3),
                                            TVVP = rlnorm(1, log(4), 0.3),
-                                           theta_vc_race_asian = rnorm(1), 
-                                           theta_cl_egfr = rnorm(1),
+                                           theta_vc_sex = rnorm(1, 0, 0.2),
+                                           theta_cl_egfr = rnorm(1, 0, 0.2),
+                                           theta_vc_race2 = rnorm(1, 0, 0.2),
+                                           theta_vc_race3 = rnorm(1, 0, 0.2),
+                                           theta_vc_race4 = rnorm(1, 0, 0.2),
                                            omega = rlnorm(4, log(0.3), 0.3),
                                            sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit$save_object(
-  "iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_covariates_fixed_allometric.rds")
+fit$save_object("iv_2cmt_linear_covariates/Stan/Fits/iv_2cmt_prop_covariates_fixed_allometric.rds")
 
 fit$save_data_file(dir = "iv_2cmt_linear_covariates/Stan/Fits/Stan_Data",
                    basename = "prop_covariates_fixed_allometric", 
