@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
@@ -23,7 +22,7 @@ R <- diag(rep(1, times = 4))
 R[2, 3] <- R[3, 2] <- 0.4 # Put in some correlation between Vmax and KM
 
 sigma_p <- 0.2
-sigma_a <- 0.25 # LLOQ = 0.5
+sigma_a <- 0 # 0.25
 
 cor_p_a <- 0
 
@@ -35,7 +34,6 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
   as_tibble() %>% 
   rename_all(toupper) %>%
   select(ID, TIME, everything()) 
-
 
 dense_grid <- seq(0, 24*7, by = 0.5)
 
@@ -102,7 +100,8 @@ stan_data <- list(n_subjects = n_subjects,
                   cor_p_a = cor_p_a,
                   solver = 1, # rk45 = 1, bdf = 2
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
   "depot_1cmt_mm/Stan/Simulate/depot_1cmt_mm_ppa_with_cmax_tmax_auc.stan") 
@@ -118,7 +117,7 @@ simulated_data <- model$sample(data = stan_data,
 params_ind <- simulated_data$draws(c("VC", "VMAX", "KM", "KA",
                                      "auc_t1_t2", "c_max", "t_max")) %>% 
   spread_draws(c(VC, VMAX, KM, KA, 
-               auc_t1_t2, c_max, t_max)[i]) %>% 
+                 auc_t1_t2, c_max, t_max)[i]) %>% 
   inner_join(dosing_data %>% 
                mutate(i = 1:n()),
              by = "i") %>% 
@@ -157,16 +156,17 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
+
+prop_or_ppa <- if_else(sigma_a == 0, "prop", "ppa")
 
 data %>%
   select(-IPRED) %>%
-  # write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_prop.csv", na = ".")
-  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_ppa.csv", na = ".")
+  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_", prop_or_ppa, ".csv"),
+            na = ".")
 
 params_ind %>%
-  # write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_prop_params_ind.csv")
-  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_ppa_params_ind.csv") 
+  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_", prop_or_ppa, 
+                  "_params_ind.csv"),
+            na = ".")
 
 

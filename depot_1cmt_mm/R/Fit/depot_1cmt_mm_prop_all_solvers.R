@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
@@ -34,7 +33,7 @@ nonmem_data %>%
     scale_color_discrete(name = "Dose (mg)") +
     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                        limits = c(NA, NA),
-                       trans = "log10") +
+                       trans = "identity") +
     scale_x_continuous(name = "Time (d)",
                        breaks = seq(0, 216, by = 24),
                        labels = seq(0, 216/24, by = 24/24),
@@ -42,15 +41,11 @@ nonmem_data %>%
     theme_bw(18) +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
-          axis.line = element_line(size = 2),
+          axis.line = element_line(linewidth = 2),
           legend.position = "bottom"))
 
-# p1 +
-#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
+p1 +
+  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -110,6 +105,7 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
+                  no_gq_predictions = 0,
                   solver = 1)
 
 model <- cmdstan_model(
@@ -123,7 +119,7 @@ fit_rk45 <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 100,
   adapt_delta = 0.8,
   refresh = 100,
   max_treedepth = 10,
@@ -136,6 +132,7 @@ fit_rk45 <- model$sample(
 
 fit_rk45$save_object("depot_1cmt_mm/Stan/Fits/depot_1cmt_mm_prop_rk45.rds")
 
+
 stan_data$solver <- 2
 fit_bdf <- model$sample(
   data = stan_data,
@@ -144,9 +141,9 @@ fit_bdf <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 100,
   adapt_delta = 0.8,
-  refresh = 50,
+  refresh = 100,
   max_treedepth = 10,
   init = function() list(TVVC = rlnorm(1, log(60), 0.3),
                          TVVMAX = rlnorm(1, log(12), 0.3),
@@ -156,4 +153,3 @@ fit_bdf <- model$sample(
                          sigma_p = rlnorm(1, log(0.2), 0.3)))
 
 fit_bdf$save_object("depot_1cmt_mm/Stan/Fits/depot_1cmt_mm_prop_bdf.rds")
-

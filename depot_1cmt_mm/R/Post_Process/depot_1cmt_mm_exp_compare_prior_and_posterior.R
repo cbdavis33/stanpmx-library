@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -26,12 +26,17 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVVC = rlnorm(1, log(60), 0.3),
-                                              TVVMAX = rlnorm(1, log(12), 0.3),
-                                              TVKM = rlnorm(1, log(3), 0.3),
-                                              TVKA = rlnorm(1, log(1), 0.3),
-                                              omega = rlnorm(4, log(0.3), 0.3),
-                                              sigma_p = rlnorm(1, log(0.2), 0.3)))
+                       init = function() 
+                         with(stan_data,
+                              list(TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+                                   TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+                                   TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+                                   TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+                                   omega = abs(rnorm(4, 0, c(scale_omega_vc, 
+                                                             scale_omega_vmax, 
+                                                             scale_omega_km,
+                                                             scale_omega_ka))),
+                                   sigma = abs(rnorm(1, 0, scale_sigma)))))
 
 fit <- read_rds("depot_1cmt_mm/Stan/Fits/depot_1cmt_mm_exp.rds")
 
@@ -99,10 +104,10 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 
-(target_comparison_error <- draws_all_df %>% 
-    filter(variable %in% c("sigma")) %>% 
+(target_comparison_sigma <- draws_all_df %>% 
+    filter(str_detect(variable, "sigma")) %>% 
     mutate(variable = factor(variable, 
-                             levels = c("sigma")),
+                             levels = "sigma"),
            variable = fct_recode(variable, "sigma" = "sigma")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
@@ -123,7 +128,7 @@ layout <- c(
 target_comparison_tv /
   target_comparison_omega /
   target_comparison_cor /
-  target_comparison_error +
+  target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 

@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
@@ -45,12 +44,8 @@ nonmem_data %>%
           axis.line = element_line(size = 2),
           legend.position = "bottom"))
 
-# p1 +
-#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
+p1 +
+  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -120,7 +115,7 @@ model <- cmdstan_model(
 
 fit <- model$sample(
   data = stan_data,
-  seed = 112358,
+  seed = 11235,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
