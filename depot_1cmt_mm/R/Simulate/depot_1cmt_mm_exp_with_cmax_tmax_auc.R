@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
@@ -32,7 +31,6 @@ dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
   as_tibble() %>% 
   rename_all(toupper) %>%
   select(ID, TIME, everything()) 
-
 
 dense_grid <- seq(0, 24*7, by = 0.5)
 
@@ -97,7 +95,8 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma = sigma,
                   solver = 1, # rk45 = 1, bdf = 2
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
   "depot_1cmt_mm/Stan/Simulate/depot_1cmt_mm_exp_with_cmax_tmax_auc.stan") 
@@ -152,14 +151,14 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 data %>%
   select(-IPRED) %>%
-  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_exp.csv", na = ".")
+  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_exp.csv"),
+            na = ".")
 
 params_ind %>%
-  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_exp_params_ind.csv") 
+  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_exp_params_ind.csv"),
+            na = ".")
 
 

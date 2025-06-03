@@ -1,11 +1,8 @@
 // First Order Absorption (oral/subcutaneous)
 // One-compartment PK Model with Michaelis-Menten elimination
-// IIV on CL, VC, VMAX, KM, KA
+// IIV on VC, VMAX, KM, KA
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // ODE solution using Torsten
-// Observations are generated from a normal that is truncated below at 0
-// Since we have a normal distribution on the error, but the DV must be > 0, it
-//   generates values from a normal that is truncated below at 0
 
 functions{
   
@@ -20,6 +17,24 @@ functions{
   
   vector depot_1cmt_mm_ode(real t, vector y, array[] real params, 
                            array[] real x_r, array[] int x_i){
+  
+    real vc = params[1];
+    real vmax = params[2];
+    real km = params[3];
+    real ka = params[4];
+    
+    real conc = y[2]/vc;
+    
+    vector[2] dydt;
+
+    dydt[1] = -ka*y[1];
+    dydt[2] = ka*y[1] - vmax*conc/(km + conc);
+    
+    return dydt;
+  }
+  
+  vector depot_1cmt_mm_with_auc_ode(real t, vector y, array[] real params, 
+                                    array[] real x_r, array[] int x_i){
   
     real vc = params[1];
     real vmax = params[2];
@@ -90,17 +105,18 @@ data{
   real<lower = 0> t_1;
   real<lower = t_1> t_2;
   
+  int<lower = 0, upper = 1> want_auc_cmax; // Want AUC Cmax, and Tmax? 
+                                           
 }
 transformed data{
   
   int n_random = 4;
-  int n_cmt = 2;
-  int n_cmt_extra = 4; // AUC, Cmax, Tmax compartments
+  int n_cmt = want_auc_cmax ? 6 : 2; // Number of compartments - depot, central (AUC, AUC_t1_t2, Cmax_ss, Tmax_ss))
 
   vector[n_random] omega = [omega_vc, omega_vmax, omega_km, omega_ka]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-
+  
   vector[2] sigma = [sigma_p, sigma_a]';
   matrix[2, 2] R_Sigma = rep_matrix(1, 2, 2);
   R_Sigma[1, 2] = cor_p_a;
@@ -108,8 +124,8 @@ transformed data{
   
   matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
   
-  array[n_cmt + n_cmt_extra] real bioav = rep_array(1.0, n_cmt + n_cmt_extra); // Hardcoding, but could be data or a parameter in another situation
-  array[n_cmt + n_cmt_extra] real tlag = rep_array(0.0, n_cmt + n_cmt_extra);  // Hardcoding, but could be data or a parameter in another situation
+  array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
+  array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding, but could be data or a parameter in another situation
   
   array[1, 2] real x_r = {{t_1, t_2}};
   
@@ -139,7 +155,7 @@ generated quantities{
     matrix[n_subjects, n_random] eta;   
     matrix[n_subjects, n_random] theta; 
     
-    matrix[n_total, n_cmt + n_cmt_extra] x_ipred;
+    matrix[n_total, n_cmt] x_ipred;
     
     for(i in 1:n_subjects){
       eta[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
@@ -154,48 +170,87 @@ generated quantities{
     
     for(j in 1:n_subjects){
       
-      if(solver == 1){
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_rk45(depot_1cmt_mm_ode,
-                         n_cmt + n_cmt_extra,
-                         time[subj_start[j]:subj_end[j]],
-                         amt[subj_start[j]:subj_end[j]],
-                         rate[subj_start[j]:subj_end[j]],
-                         ii[subj_start[j]:subj_end[j]],
-                         evid[subj_start[j]:subj_end[j]],
-                         cmt[subj_start[j]:subj_end[j]],
-                         addl[subj_start[j]:subj_end[j]],
-                         ss[subj_start[j]:subj_end[j]],
-                         {VC[j], VMAX[j], KM[j], KA[j]},
-                         bioav, tlag, x_r)';
-                       
-      }else{
+      if(want_auc_cmax){
+        if(solver == 1){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_rk45(depot_1cmt_mm_with_auc_ode,
+                           n_cmt,
+                           time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {VC[j], VMAX[j], KM[j], KA[j]},
+                           bioav, tlag, x_r)';
+                           
+        }else{
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_bdf(depot_1cmt_mm_with_auc_ode,
+                          n_cmt,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {VC[j], VMAX[j], KM[j], KA[j]},
+                          bioav, tlag, x_r)';
+                         
+        }
         
-        x_ipred[subj_start[j]:subj_end[j],] =
-          pmx_solve_bdf(depot_1cmt_mm_ode,
-                        n_cmt + n_cmt_extra,
-                        time[subj_start[j]:subj_end[j]],
-                        amt[subj_start[j]:subj_end[j]],
-                        rate[subj_start[j]:subj_end[j]],
-                        ii[subj_start[j]:subj_end[j]],
-                        evid[subj_start[j]:subj_end[j]],
-                        cmt[subj_start[j]:subj_end[j]],
-                        addl[subj_start[j]:subj_end[j]],
-                        ss[subj_start[j]:subj_end[j]],
-                        {VC[j], VMAX[j], KM[j], KA[j]},
-                        bioav, tlag, x_r)';
-        
-      }
-      
-      ipred[subj_start[j]:subj_end[j]] = 
-        x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
-        
-      auc[subj_start[j]:subj_end[j]] = 
+        auc[subj_start[j]:subj_end[j]] = 
                                 x_ipred[subj_start[j]:subj_end[j], 3] ./ VC[j];
       
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]) - t_1;
+        auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]) / VC[j];
+        c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]);
+        t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]) - t_1;
+        
+      }else{
+        if(solver == 1){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_rk45(depot_1cmt_mm_ode,
+                           n_cmt,
+                           time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {VC[j], VMAX[j], KM[j], KA[j]},
+                           bioav, tlag, x_r)';
+                           
+        }else{
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_bdf(depot_1cmt_mm_ode,
+                          n_cmt,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {VC[j], VMAX[j], KM[j], KA[j]},
+                          bioav, tlag, x_r)';
+                         
+        }
+        
+      }
+          
+      ipred[subj_start[j]:subj_end[j]] = 
+        x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
     
     }
 

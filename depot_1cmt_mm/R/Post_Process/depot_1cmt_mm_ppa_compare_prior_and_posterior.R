@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -26,12 +26,18 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVVC = rlnorm(1, log(60), 0.3),
-                                              TVVMAX = rlnorm(1, log(12), 0.3),
-                                              TVKM = rlnorm(1, log(3), 0.3),
-                                              TVKA = rlnorm(1, log(1), 0.3),
-                                              omega = rlnorm(4, log(0.3), 0.3),
-                                              sigma = rlnorm(2, log(0.4), 0.3)))
+                       init = function() 
+                         with(stan_data,
+                              list(TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+                                   TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+                                   TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+                                   TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+                                   omega = abs(rnorm(4, 0, c(scale_omega_vc, 
+                                                             scale_omega_vmax, 
+                                                             scale_omega_km,
+                                                             scale_omega_ka))),
+                                   sigma = abs(rnorm(2, 0, c(scale_sigma_p,
+                                                             scale_sigma_a))))))
 
 fit <- read_rds("depot_1cmt_mm/Stan/Fits/depot_1cmt_mm_ppa.rds")
 
@@ -119,7 +125,7 @@ layout <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 3.5, r = 6),
-  area(t = 4, l = 3, b = 4.5, r = 4)
+  area(t = 4, l = 1, b = 4.5, r = 6)
 )
 
 target_comparison_tv /
@@ -128,4 +134,4 @@ target_comparison_tv /
   target_comparison_error +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 
