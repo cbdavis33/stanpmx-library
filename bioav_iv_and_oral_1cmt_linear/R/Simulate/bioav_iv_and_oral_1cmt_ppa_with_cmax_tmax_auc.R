@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
@@ -40,7 +39,7 @@ dosing_data_oral <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
          cohort = if_else(ID <= n_subjects_per_dose, 1, 2))
 
 dosing_data_iv <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
-                            cmt = 2, amt = c(100, 300), ss = 0, tinf = 4, 
+                            cmt = 2, amt = c(100, 300), ss = 0, tinf = 2, 
                             evid = 1) %>%
   as_tibble() %>% 
   rename_with(toupper, .cols = everything()) %>%
@@ -51,11 +50,11 @@ dosing_data_iv <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24,
 
 dosing_data_iv_and_oral_iv <- expand.ev(ID = 1:n_subjects_per_dose, addl = 1, 
                                         ii = 24, cmt = 2, amt = c(100, 300), 
-                                        ss = 0, tinf = 4, evid = 1) %>% 
+                                        ss = 0, tinf = 2, evid = 1) %>% 
   as.ev()
 
 dosing_data_iv_and_oral_oral <- expand.ev(ID = 1:(2*n_subjects_per_dose), 
-                                          addl = 4, ii = 24, cmt = 1, amt = 100, 
+                                          addl = 4, ii = 24, cmt = 1, amt = 300, 
                                           ss = 0, tinf = 0, evid = 1) %>% 
   as.ev()
 
@@ -72,26 +71,38 @@ dosing_data <- dosing_data_oral %>%
   bind_rows(dosing_data_iv,
             dosing_data_iv_and_oral) %>% 
   mutate(cohort = factor(cohort)) %>% 
-  rename_with(toupper, .cols = everything())
+  rename_with(toupper, .cols = everything()) # %>% 
+  # mutate(TYPE = "want dense grid")
 
 dense_grid <- seq(0, 24*7, by = 0.5)
 
-sampling_times <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
-realistic_times <- c(sampling_times, 72, 144, 144 + sampling_times)
+sampling_times_oral <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
+realistic_times_oral <- c(sampling_times_oral, 72, 144, 
+                          144 + sampling_times_oral)
 
-# times_to_simulate <- dense_grid
-times_to_simulate <- realistic_times
+sampling_times_iv <- c(2, 3, 4, 6, 8, 12, 24)
+realistic_times_iv <- c(sampling_times_iv, 72, 144, 
+                        144 + sampling_times_iv)
+
+realistic_times_iv_and_oral <- c(sampling_times_iv, 72, 144, 
+                                 144 + sampling_times_oral)
 
 nonmem_data_simulate <- dosing_data %>% 
   group_by(ID) %>% 
-  slice(rep(1, times = length(times_to_simulate))) %>% 
+  slice_head(n = 1) %>% 
+  mutate(TIME = case_when(TYPE == "IV" ~ list(realistic_times_iv),
+                          TYPE == "Oral" ~ list(realistic_times_oral),
+                          TYPE == "IV and Oral" ~ list(realistic_times_iv_and_oral),
+                          .default = list(dense_grid))) %>% 
+  ungroup() %>%
+  unnest(TIME) %>% 
   mutate(AMT = 0,
          ADDL = 0,
          II = 0,
          CMT = 2,
-         EVID = 0,
-         # RATE = 0,
-         TIME = times_to_simulate) %>% 
+         RATE = 0,
+         TINF = 0,
+         EVID = 0) %>% 
   ungroup() %>%
   bind_rows(dosing_data) %>% 
   arrange(ID, TIME, AMT) %>% 
@@ -139,29 +150,48 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma_a = sigma_a,
                   cor_p_a = cor_p_a,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  solver = 4)
 
 model <- cmdstan_model(
   "bioav_iv_and_oral_1cmt_linear/Stan/Simulate/bioav_iv_and_oral_1cmt_ppa_with_cmax_tmax_auc.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 1123,
+                               seed = 54321,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA", "BIOAV",
-                                     "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
-  spread_draws(CL[i], VC[i], KA[i], BIOAV[i],
-               auc_t1_t2[i], c_max[i], t_max[i], t_half[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, KA, BIOAV, TYPE, COHORT, auc_t1_t2, c_max, t_max, t_half, 
-         TYPE, COHORT)
+
+params_ind <- if(stan_data$solver == 4){
+  
+  simulated_data$draws(c("CL", "VC", "KA", "BIOAV",
+                         "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
+    spread_draws(c(CL, VC, KA, BIOAV,
+                   auc_t1_t2, c_max, t_max, t_half)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                distinct(ID, TYPE, COHORT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, KA, BIOAV, auc_t1_t2, c_max, t_max, t_half, 
+           TYPE, COHORT)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "KA", "BIOAV")) %>% 
+    spread_draws(c(CL, VC, KA, BIOAV)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                distinct(ID, TYPE, COHORT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, KA, BIOAV, TYPE, COHORT)
+  
+}
+
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -193,19 +223,18 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-# p_1 +
-#   facet_trelliscope(~ID, nrow = 2, ncol = 2)
-# 
+
+prop_or_ppa <- if_else(sigma_a == 0, "prop", "ppa")
+
 data %>%
   select(-IPRED) %>%
-  write_csv("bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_ppa.csv",
+  write_csv(str_c("bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_",
+                  prop_or_ppa, ".csv"),
             na = ".")
-# write_csv("bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_prop.csv", 
-# na = ".")
 
 params_ind %>%
-  write_csv(
-    "bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_ppa_params_ind.csv")
-# "bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_prop_params_ind.csv")
+  write_csv(str_c("bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_",
+                  prop_or_ppa, "_params_ind.csv"),
+            na = ".")
 
 

@@ -1,20 +1,17 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv(
-  "bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_prop.csv",
-  na = ".") %>% 
+nonmem_data <- read_csv("bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_prop.csv",
+                        na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
-  mutate(cohort = factor(cohort),
-         DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
+  mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq)) # This value can be anything except NA. It'll be indexed away 
 
 ## Summary of BLOQ values
@@ -26,29 +23,32 @@ nonmem_data %>%
             n_bloq = sum(bloq)) %>%
   filter(n_bloq > 0)
 
-(p1 <- ggplot(nonmem_data %>%
-                filter(mdv == 0)) +
-    geom_line(mapping = aes(x = time, y = DV, group = ID, color = cohort)) +
-    geom_point(mapping = aes(x = time, y = DV, group = ID, color = cohort)) +
-    scale_color_discrete(name = "Cohort") +
-    scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
-                       limits = c(NA, NA),
-                       trans = "log10") +
-    scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, 168, by = 24),
-                       labels = seq(0, 168/24, by = 24/24),
-                       limits = c(0, NA)) +
-    theme_bw(18) +
-    theme(axis.text = element_text(size = 14, face = "bold"),
-          axis.title = element_text(size = 18, face = "bold"),
-          axis.line = element_line(linewidth = 2),
-          legend.position = "bottom"))
-
-p1 +
-  facet_wrap(~cohort, scales = "free_y", labeller = label_both, ncol = 3)
-
-p1 +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# (p1 <- ggplot(nonmem_data %>%
+#                 group_by(ID) %>%
+#                 mutate(Dose = factor(max(amt, na.rm = TRUE))) %>%
+#                 ungroup() %>%
+#                 filter(mdv == 0)) +
+#     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
+#     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
+#     scale_color_discrete(name = "Dose (mg)") +
+#     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+#                        limits = c(NA, NA),
+#                        trans = "identity") +
+#     scale_x_continuous(name = "Time (d)",
+#                        breaks = seq(0, 216, by = 24),
+#                        labels = seq(0, 216/24, by = 24/24),
+#                        limits = c(0, NA)) +
+#     theme_bw(18) +
+#     theme(axis.text = element_text(size = 14, face = "bold"),
+#           axis.title = element_text(size = 18, face = "bold"),
+#           axis.line = element_line(linewidth = 2),
+#           legend.position = "bottom"))
+# 
+# p1 +
+#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
+# 
+# p1 +
+#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 
 n_subjects <- nonmem_data %>%  # number of individuals
@@ -105,99 +105,73 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
                   scale_omega_ka = 0.4,
-                  scale_omega_bioav = 0.3,
+                  scale_omega_bioav = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  solver = 1)
+                  no_gq_predictions = 0,
+                  solver = 1) 
 
 model <- cmdstan_model(
   "bioav_iv_and_oral_1cmt_linear/Stan/Fit/bioav_iv_and_oral_1cmt_prop_all_solvers.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit_analytical <- 
-  model$sample(data = stan_data,
-               seed = 11235,
-               chains = 4,
-               parallel_chains = 4,
-               threads_per_chain = parallel::detectCores()/4,
-               iter_warmup = 500,
-               iter_sampling = 1000,
-               adapt_delta = 0.8,
-               refresh = 500,
-               max_treedepth = 10,
-               init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                      TVVC = rlnorm(1, log(8), 0.3),
-                                      TVKA = rlnorm(1, log(0.8), 0.3),
-                                      TVBIOAV = rbeta(1, 3, 3),
-                                      omega = rlnorm(4, log(0.3), 0.3),
-                                      sigma = rlnorm(1, log(0.4), 0.3)))
+fit_analytical <- model$sample(data = stan_data,
+                               seed = 112358,
+                               chains = 4,
+                               parallel_chains = 4,
+                               threads_per_chain = parallel::detectCores()/4,
+                               iter_warmup = 500,
+                               iter_sampling = 200,
+                               adapt_delta = 0.8,
+                               refresh = 500,
+                               max_treedepth = 10,
+                               init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                                      TVVC = rlnorm(1, log(8), 0.3),
+                                                      TVKA = rlnorm(1, log(0.8), 0.3),
+                                                      TVBIOAV = rbeta(1, 1, 1),
+                                                      omega = rlnorm(4, log(0.3), 0.3),
+                                                      sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit_analytical$save_object(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_prop_analytical.rds")
+fit_analytical$save_object("bioav_iv_and_oral_1cmt_linear/Stan/Fits/prop_analytical.rds")
 
 stan_data$solver <- 2
-fit_mat_exp <- 
-  model$sample(data = stan_data,
-               seed = 11235,
-               chains = 4,
-               parallel_chains = 4,
-               threads_per_chain = parallel::detectCores()/4,
-               iter_warmup = 500,
-               iter_sampling = 1000,
-               adapt_delta = 0.8,
-               refresh = 500,
-               max_treedepth = 10,
-               init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                      TVVC = rlnorm(1, log(8), 0.3),
-                                      TVKA = rlnorm(1, log(0.8), 0.3),
-                                      TVBIOAV = rbeta(1, 3, 3),
-                                      omega = rlnorm(4, log(0.3), 0.3),
-                                      sigma = rlnorm(1, log(0.4), 0.3)))
+fit_mat_exp <- model$sample(data = stan_data,
+                            seed = 112358,
+                            chains = 4,
+                            parallel_chains = 4,
+                            threads_per_chain = parallel::detectCores()/4,
+                            iter_warmup = 500,
+                            iter_sampling = 200,
+                            adapt_delta = 0.8,
+                            refresh = 500,
+                            max_treedepth = 10,
+                            init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                                   TVVC = rlnorm(1, log(8), 0.3),
+                                                   TVKA = rlnorm(1, log(0.8), 0.3),
+                                                   TVBIOAV = rbeta(1, 1, 1),
+                                                   omega = rlnorm(4, log(0.3), 0.3),
+                                                   sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit_mat_exp$save_object(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_prop_mat_exp.rds")
+fit_mat_exp$save_object("bioav_iv_and_oral_1cmt_linear/Stan/Fits/prop_mat_exp.rds")
 
 stan_data$solver <- 3
-fit_rk45 <- 
-  model$sample(data = stan_data,
-               seed = 11235,
-               chains = 4,
-               parallel_chains = 4,
-               threads_per_chain = parallel::detectCores()/4,
-               iter_warmup = 500,
-               iter_sampling = 1000,
-               adapt_delta = 0.8,
-               refresh = 500,
-               max_treedepth = 10,
-               init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                      TVVC = rlnorm(1, log(8), 0.3),
-                                      TVKA = rlnorm(1, log(0.8), 0.3),
-                                      TVBIOAV = rbeta(1, 3, 3),
-                                      omega = rlnorm(4, log(0.3), 0.3),
-                                      sigma = rlnorm(1, log(0.4), 0.3)))
+fit_rk45 <- model$sample(data = stan_data,
+                            seed = 112358,
+                            chains = 4,
+                            parallel_chains = 4,
+                            threads_per_chain = parallel::detectCores()/4,
+                            iter_warmup = 500,
+                            iter_sampling = 200,
+                            adapt_delta = 0.8,
+                            refresh = 500,
+                            max_treedepth = 10,
+                            init = function() list(TVCL = rlnorm(1, log(1), 0.3),
+                                                   TVVC = rlnorm(1, log(8), 0.3),
+                                                   TVKA = rlnorm(1, log(0.8), 0.3),
+                                                   TVBIOAV = rbeta(1, 1, 1),
+                                                   omega = rlnorm(4, log(0.3), 0.3),
+                                                   sigma_p = rlnorm(1, log(0.2), 0.3)))
 
-fit_rk45$save_object(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_prop_rk45.rds")
+fit_rk45$save_object("bioav_iv_and_oral_1cmt_linear/Stan/Fits/prop_rk45.rds")
 
-stan_data$solver <- 4
-fit_bdf <- 
-  model$sample(data = stan_data,
-               seed = 11235,
-               chains = 4,
-               parallel_chains = 4,
-               threads_per_chain = parallel::detectCores()/4,
-               iter_warmup = 500,
-               iter_sampling = 1000,
-               adapt_delta = 0.8,
-               refresh = 500,
-               max_treedepth = 10,
-               init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                      TVVC = rlnorm(1, log(8), 0.3),
-                                      TVKA = rlnorm(1, log(0.8), 0.3),
-                                      TVBIOAV = rbeta(1, 3, 3),
-                                      omega = rlnorm(4, log(0.3), 0.3),
-                                      sigma = rlnorm(1, log(0.4), 0.3)))
-
-fit_bdf$save_object(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_prop_bdf.rds")

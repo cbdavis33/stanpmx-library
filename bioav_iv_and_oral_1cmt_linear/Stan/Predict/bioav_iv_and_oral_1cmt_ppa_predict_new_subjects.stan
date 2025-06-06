@@ -1,10 +1,11 @@
 // Some subjects have First Order Absorption (oral/subcutaneous), some IV, some 
 //   both
 // One-compartment PK Model
-// IIV on CL, VC, KA, and BIOAV (full covariance matrix)
+// IIV on CL, VC, KA, BIOAV (full covariance matrix)
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
-// General ODE solution using Torsten to get out individual estimates of AUC, 
-//   Cmax, Tmax, ...
+// User's choice of linear ODE solution or general ODE solution
+// General ODE solution using Torsten will get out individual estimates of AUC, 
+//   Cmax, Tmax, ... linear ODE will not
 // Predictions are generated from a normal that is truncated below at 0
 
 functions{
@@ -63,12 +64,16 @@ data{
   
   real<lower = 0> t_1;   // Time at which to start SS calculations (AUC_ss, C_max_ss, ...)
   real<lower = t_1> t_2; // Time at which to end SS calculations (AUC_ss, C_max_ss, ...)
- 
+  
+  int<lower = 0, upper = 1> want_auc_cmax; // Want AUC and Cmax? If so, it'll 
+                                           // use the ODE solution. Otherwise,
+                                           // it'll use the linear ODE solution (and be faster)
+  
 }
 transformed data{ 
   
   int n_random = 4; // Number of random effects
-  int n_cmt = 5;    // Number of compartments (depot, central, AUC_ss, Cmax_ss, Tmax_ss)
+  int n_cmt = want_auc_cmax ? 5 : 2; // Number of compartments - depot, central (AUC_ss, Cmax_ss, Tmax_ss))
   
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
   
@@ -92,29 +97,28 @@ parameters{
   
 }
 generated quantities{
+
+  vector[n_time_new] epred_stan; // f(TVs, x, eta = eta_new), eta_new ~ multi_normal(0, Omega) 
+  vector[n_time_new] epred;      // epred_stan + error
   
-  vector[n_time_new] ipred;       // ipred for the observed individuals at the new timepoints
-  vector[n_time_new] pred;        // pred for the observed individuals at the new timepoints
-  vector[n_time_new] dv;          // dv for the observed individuals at the new timepoints
-  vector[n_subjects_new] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
-  vector[n_subjects_new] c_max;   // Cmax between t1 and t2 (c_max_ss)
-  vector[n_subjects_new] t_max;   // Tmax between t1 and t2, then subtract off t1
-  vector[n_subjects_new] t_half;  // half-life
+  vector[want_auc_cmax ? n_subjects_new : 0] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
+  vector[want_auc_cmax ? n_subjects_new : 0] c_max;   // Cmax between t1 and t2 (c_max_ss)
+  vector[want_auc_cmax ? n_subjects_new : 0] t_max;   // Tmax between t1 and t2, then subtract off t1
+  vector[n_subjects_new] t_half;                      // half-life
   
   vector[n_subjects_new] CL;
   vector[n_subjects_new] VC;
   vector[n_subjects_new] KA;
   vector[n_subjects_new] BIOAV;
   vector[n_subjects_new] KE;
- 
-  {
-    row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVKA, 
-                                                         TVBIOAV});
 
+  {
+    row_vector[n_random] typical_values = to_row_vector({TVCL, TVVC, TVKA,
+                                                         TVBIOAV});
+    
     matrix[n_subjects_new, n_random] eta_new;
     matrix[n_subjects_new, n_random] theta_new;
-    matrix[n_time_new, n_cmt] x_ipred;
-    matrix[n_time_new, 2] x_pred;
+    matrix[n_time_new, n_cmt] x_epred;
     
     matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
     matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
@@ -128,36 +132,23 @@ generated quantities{
                                                diag_pre_multiply(omega, L))';
     }
     theta_new = (rep_matrix(typical_values, n_subjects_new) .* exp(eta_new));
-    BIOAV = Phi(inv_Phi(TVBIOAV) + eta_new[, 4]);
 
     for(j in 1:n_subjects_new){
       
-      row_vector[n_random] theta_j = theta_new[j]; // access the parameters for subject j
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
       
-      CL[j] = theta_j[1];
-      VC[j] = theta_j[2];
-      KA[j] = theta_j[3];
+      CL[j] = theta_j_new[1];
+      VC[j] = theta_j_new[2];
+      KA[j] = theta_j_new[3];
+      BIOAV[j] = Phi(inv_Phi(TVBIOAV) + eta_new[j, 4]); // Phi(inv_Phi(TVBIOAV) + covariate_effects + eta_new[j, 4]);
       KE[j] = CL[j]/VC[j];
-      
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(depot_1cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate[subj_start[j]:subj_end[j]],
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       {CL[j], VC[j], KA[j]}, 
-                       {BIOAV[j], 1, 1, 1, 1}, tlag, x_r)';
-                      
-      ipred[subj_start[j]:subj_end[j]] = 
-        x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
-
-      x_pred[subj_start[j]:subj_end[j],] =
-        pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+    
+      if(want_auc_cmax == 1){
+        
+        x_epred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(depot_1cmt_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
                          amt[subj_start[j]:subj_end[j]],
                          rate[subj_start[j]:subj_end[j]],
                          ii[subj_start[j]:subj_end[j]],
@@ -165,29 +156,50 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         {TVCL, TVVC, TVKA}, 
-                         {TVBIOAV, 1}, 
-                         {0, 0})';
-
-      pred[subj_start[j]:subj_end[j]] = 
-        x_pred[subj_start[j]:subj_end[j], 2] ./ TVVC;
+                         {CL[j], VC[j], KA[j]}, 
+                         {BIOAV[j], 1, 1, 1, 1},
+                         tlag, x_r)';
+                        
+        epred_stan[subj_start[j]:subj_end[j]] = 
+          x_epred[subj_start[j]:subj_end[j], 2] ./ VC[j];
+          
+        auc_ss[j] = max(x_epred[subj_start[j]:subj_end[j], 3]) / VC[j];
+        c_max[j] = max(x_epred[subj_start[j]:subj_end[j], 4]);
+        t_max[j] = max(x_epred[subj_start[j]:subj_end[j], 5]) - t_1;
+          
+      }else{
         
-      auc_ss[j] = max(x_ipred[subj_start[j]:subj_end[j], 3]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 4]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) - t_1;
+        x_epred[subj_start[j]:subj_end[j],] =
+          pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {CL[j], VC[j], KA[j]},
+                           {BIOAV[j], 1})';
+
+        epred_stan[subj_start[j]:subj_end[j]] = 
+          x_epred[subj_start[j]:subj_end[j], 2] ./ VC[j];
+        
+      }
+  
       t_half[j] = log(2) ./ KE[j];
+    
     }
 
-  
     for(i in 1:n_time_new){
-      if(ipred[i] == 0){
-        dv[i] = 0;
+      if(epred_stan[i] == 0){
+        epred[i] = 0;
       }else{
-        real ipred_tmp = ipred[i];
-        real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
-                              2*ipred_tmp*sigma_p_a);
-        dv[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+        real epred_tmp = epred_stan[i];
+        real sigma_tmp_e = sqrt(square(epred_tmp) * sigma_sq_p + sigma_sq_a + 
+                                2*epred_tmp*sigma_p_a);
+        epred[i] = normal_lb_rng(epred_tmp, sigma_tmp_e, 0.0);
       }
     }
   }
 }
+

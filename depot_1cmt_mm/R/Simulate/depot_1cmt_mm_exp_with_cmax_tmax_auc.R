@@ -109,15 +109,29 @@ simulated_data <- model$sample(data = stan_data,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("VC", "VMAX", "KM", "KA",
-                                     "auc_t1_t2", "c_max", "t_max")) %>% 
-  spread_draws(c(VC, VMAX, KM, KA, 
-                 auc_t1_t2, c_max, t_max)[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, VC, VMAX, KM, KA, auc_t1_t2, c_max, t_max)
+params_ind <- if(stan_data$want_auc_cmax){
+  
+  simulated_data$draws(c("VC", "VMAX", "KM", "KA",
+                         "auc_t1_t2", "c_max", "t_max")) %>% 
+    spread_draws(c(VC, VMAX, KM, KA, 
+                   auc_t1_t2, c_max, t_max)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, VC, VMAX, KM, KA, auc_t1_t2, c_max, t_max)
+  
+}else{
+  
+  simulated_data$draws(c("VC", "VMAX", "KM", "KA")) %>% 
+    spread_draws(c(VC, VMAX, KM, KA)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, VC, VMAX, KM, KA)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -154,11 +168,11 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
 
 data %>%
   select(-IPRED) %>%
-  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_exp.csv"),
+  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_exp.csv",
             na = ".")
 
 params_ind %>%
-  write_csv(str_c("depot_1cmt_mm/Data/depot_1cmt_mm_exp_params_ind.csv"),
+  write_csv("depot_1cmt_mm/Data/depot_1cmt_mm_exp_params_ind.csv",
             na = ".")
 
 
