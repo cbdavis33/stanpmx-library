@@ -15,7 +15,7 @@ library(tidyverse)
 set_cmdstan_path("~/Torsten/cmdstan")
 
 nonmem_data <- read_csv(
-  "bioav_iv_and_oral_1cmt_linear/Data/bioav_iv_and_oral_1cmt_ppa.csv",
+  "bioav_iv_and_oral_2cmt_linear/Data/bioav_iv_and_oral_2cmt_exp.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -34,8 +34,7 @@ nonmem_data %>%
 
 
 ## Read in fit
-fit <- read_rds(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Fits/bioav_iv_and_oral_1cmt_ppa.rds")
+fit <- read_rds("bioav_iv_and_oral_2cmt_linear/Stan/Fits/bioav_iv_and_oral_2cmt_exp.rds")
 
 draws_df <- fit$draws(format = "draws_df")
 
@@ -271,13 +270,13 @@ stan_data <- list(n_subjects = n_subjects,
                   want_auc_cmax = 0)
 
 model <- cmdstan_model(
-  "bioav_iv_and_oral_1cmt_linear/Stan/Predict/bioav_iv_and_oral_1cmt_ppa_predict_observed_subjects.stan")
+  "bioav_iv_and_oral_2cmt_linear/Stan/Predict/bioav_iv_and_oral_2cmt_exp_predict_observed_subjects.stan")
 
 # This object can get VERY big with the dense grid, so I sometimes thin a little
 # if I'm just plotting. It won't make much difference. For actual inference, 
 # don't thin. To do no thinning, do thin_draws(1)
 preds <- model$generate_quantities(fit$draws() %>%
-                                     thin_draws(10),
+                                     thin_draws(40),
                                    data = stan_data,
                                    parallel_chains = 4,
                                    seed = 1234)
@@ -449,7 +448,7 @@ zxc %>%
              labeller = labeller(i = function(x) str_c("Observation #", x))) 
 
 
-## VPCs. Also see ../VPC/bioav_iv_and_oral_1cmt_ppa_vpc.R for an alternate but equivalent
+## VPCs. Also see ../VPC/bioav_iv_and_oral_2cmt_exp_vpc.R for an alternate but equivalent
 ## way to do VPCs
 
 preds_col <- draws_df %>% 
@@ -543,7 +542,7 @@ p_vpc +
   p_pcvpc
 
 
-## NPDEs. Also see ../NPDE/bioav_iv_and_oral_1cmt_ppa_npde.R for an alternate but 
+## NPDEs. Also see ../NPDE/bioav_iv_and_oral_2cmt_exp_npde.R for an alternate but 
 ## equivalent way to do NPDEs
 
 data_obs <- nonmem_data %>% 
@@ -889,7 +888,7 @@ plot_shrinkage_multiple <- function(draw){
     left_join(nonmem_data %>% 
                 distinct(ID, type),
               by = "ID") %>% 
-    filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
+    filter(!(.variable %in% c("eta_bioav", "eta_ka") & type == "IV")) %>% 
     group_by(.draw, .variable) %>% 
     summarize(sd_eta = sd(.value)) %>% 
     ungroup() %>% 
@@ -921,8 +920,7 @@ data_shrinkage_by_draw <- draws_for_shrinkage %>%
                left_join(nonmem_data %>%
                            distinct(ID, type),
                          by = "ID") %>%
-               filter(!(.variable %in% c("eta_ka", "eta_bioav") & 
-                          type == "IV")) %>% 
+               filter(!(.variable %in% c("eta_bioav", "eta_ka") & type == "IV")) %>% 
                select(-type) %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -948,7 +946,7 @@ draws_df %>%
   left_join(nonmem_data %>% 
               distinct(ID, type),
             by = "ID") %>% 
-  filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
+  filter(!(.variable %in% c("eta_bioav", "eta_ka") & type == "IV")) %>% 
   summarize(estimate = mean(.value)) %>% 
   ungroup() %>% 
   group_by(.variable) %>% 
@@ -973,8 +971,7 @@ data_shrinkage_with_point_estimates <- draws_df %>%
                left_join(nonmem_data %>%
                            distinct(ID, type),
                          by = "ID") %>%
-               filter(!(.variable %in% c("eta_ka", "eta_bioav") & 
-                          type == "IV")) %>% 
+               filter(!(.variable %in% c("eta_bioav", "eta_ka") & type == "IV")) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
@@ -995,7 +992,7 @@ draws_df %>%
   left_join(nonmem_data %>%
               distinct(ID, type),
             by = "ID") %>%
-  filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
+  filter(!(.variable %in% c("eta_bioav", "eta_ka") & type == "IV")) %>% 
   summarize(estimate = mean(.value)) %>% 
   ungroup() %>% 
   group_by(.variable) %>% 
@@ -1017,13 +1014,14 @@ draws_df %>%
 # And maybe it's just cool to look at individual posterior densities on top of 
 # the density of the population parameter
 blah <- draws_df %>%
-  gather_draws(CL[ID], VC[ID], KA[ID], BIOAV[ID], TVCL, TVVC, TVKA, TVBIOAV) %>%
+  gather_draws(CL[ID], VC[ID], Q[ID], VP[ID],  KA[ID], BIOAV[ID], 
+               TVCL, TVVC, TVQ, TVVP, TVKA, TVBIOAV) %>%
   ungroup() %>%
   left_join(nonmem_data %>%
               distinct(ID, type),
             by = "ID") %>%
   mutate(across(c(ID, .variable), as.factor)) %>% 
-  filter(!(.variable %in% c("KA", "BIOAV") & type == "IV")) 
+  filter(!(.variable %in% c("BIOAV", "KA") & type == "IV")) 
 
 ggplot() +
   geom_density(data = blah %>% 
@@ -1046,7 +1044,8 @@ ggplot() +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
   theme(legend.position = "bottom") +
   scale_fill_manual(name = "Population Parameter",
-                    values = c("red", "blue", "green", "purple")) +
+                    values = c("red", "blue", "green", "purple", "yellow",
+                               "magenta")) +
   guides(color = "none") +
   ggtitle("Individual Parameter Posterior Densities") 
 
@@ -1056,3 +1055,4 @@ ggplot() +
 fit_loo <- fit$loo()
 fit_loo
 plot(fit_loo, label_points = TRUE)
+
