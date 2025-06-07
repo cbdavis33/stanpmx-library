@@ -889,7 +889,7 @@ plot_shrinkage_multiple <- function(draw){
     left_join(nonmem_data %>% 
                 distinct(ID, type),
               by = "ID") %>% 
-    filter(!(.variable == "eta_bioav" & type == "IV")) %>% 
+    filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
     group_by(.draw, .variable) %>% 
     summarize(sd_eta = sd(.value)) %>% 
     ungroup() %>% 
@@ -921,7 +921,8 @@ data_shrinkage_by_draw <- draws_for_shrinkage %>%
                left_join(nonmem_data %>%
                            distinct(ID, type),
                          by = "ID") %>%
-               filter(!(.variable == "eta_bioav" & type == "IV")) %>%
+               filter(!(.variable %in% c("eta_ka", "eta_bioav") & 
+                          type == "IV")) %>% 
                select(-type) %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
                         toupper()) %>%
@@ -947,7 +948,7 @@ draws_df %>%
   left_join(nonmem_data %>% 
               distinct(ID, type),
             by = "ID") %>% 
-  filter(!(.variable == "eta_bioav" & type == "IV")) %>% 
+  filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
   summarize(estimate = mean(.value)) %>% 
   ungroup() %>% 
   group_by(.variable) %>% 
@@ -972,7 +973,8 @@ data_shrinkage_with_point_estimates <- draws_df %>%
                left_join(nonmem_data %>%
                            distinct(ID, type),
                          by = "ID") %>%
-               filter(!(.variable == "eta_bioav" & type == "IV")) %>%
+               filter(!(.variable %in% c("eta_ka", "eta_bioav") & 
+                          type == "IV")) %>% 
                summarize(ind_params = mean(.value)) %>% 
                ungroup() %>% 
                mutate(.variable = str_remove(.variable, "eta_") %>%
@@ -993,7 +995,7 @@ draws_df %>%
   left_join(nonmem_data %>%
               distinct(ID, type),
             by = "ID") %>%
-  filter(!(.variable == "eta_bioav" & type == "IV")) %>%
+  filter(!(.variable %in% c("eta_ka", "eta_bioav") & type == "IV")) %>% 
   summarize(estimate = mean(.value)) %>% 
   ungroup() %>% 
   group_by(.variable) %>% 
@@ -1021,7 +1023,7 @@ blah <- draws_df %>%
               distinct(ID, type),
             by = "ID") %>%
   mutate(across(c(ID, .variable), as.factor)) %>% 
-  filter(!(.variable == "BIOAV" & type == "IV")) 
+  filter(!(.variable %in% c("KA", "BIOAV") & type == "IV")) 
 
 ggplot() +
   geom_density(data = blah %>% 
