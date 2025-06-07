@@ -430,14 +430,6 @@ generated quantities{
       KA_new[j] = theta_j_new[3];
       BIOAV_new[j] = Phi(inv_Phi(TVBIOAV) + eta_new[j, 4]); // Phi(inv_Phi(TVBIOAV) + covariate_effects + eta_new[j, 4]);
       KE_new[j] = CL_new[j]/VC_new[j];
-    
-      matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
-      
-      K[1, 1] = -KA[j];
-      K[2, 1] = KA[j];
-      K[2, 2] = -CL[j]/VC[j];
       
       if(solver == 1){
         
@@ -478,6 +470,14 @@ generated quantities{
                            {bioav_p, 1})';
           
       }else if(solver == 2){
+      
+        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+        matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
+        matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
+      
+        K[1, 1] = -KA[j];
+        K[2, 1] = KA[j];
+        K[2, 2] = -CL[j]/VC[j];
       
         x_ipred[subj_start[j]:subj_end[j], ] =
           pmx_solve_linode(time[subj_start[j]:subj_end[j]],
