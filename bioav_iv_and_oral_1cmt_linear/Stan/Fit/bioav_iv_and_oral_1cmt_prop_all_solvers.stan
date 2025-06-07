@@ -113,11 +113,6 @@ functions{
       int j = n + start - 1; // j is the ID of the current subject
       
       if(solver == 1){
-        
-        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-        K[1, 1] = -KA[j];
-        K[2, 1] = KA[j];
-        K[2, 2] = -CL[j]/VC[j];
       
         x_ipred[subj_start[j]:subj_end[j],] =
           pmx_solve_onecpt(time[subj_start[j]:subj_end[j]],
