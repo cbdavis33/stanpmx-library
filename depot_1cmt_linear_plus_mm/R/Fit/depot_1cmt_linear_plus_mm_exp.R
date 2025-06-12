@@ -1,14 +1,14 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -45,12 +45,8 @@ nonmem_data %>%
           axis.line = element_line(size = 2),
           legend.position = "bottom"))
 
-# p1 +
-#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
+p1 +
+  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -95,11 +91,11 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 0.6,
-                  location_tvvc = 8,
-                  location_tvvmax = 45,
+                  location_tvcl = 0.7,
+                  location_tvvc = 15,
+                  location_tvvmax = 40,
                   location_tvkm = 6,
-                  location_tvka = 0.8,
+                  location_tvka = 0.9,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_tvvmax = 1,
@@ -130,16 +126,26 @@ fit <- model$sample(
   adapt_delta = 0.8,
   refresh = 100,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVVMAX = rlnorm(1, log(42), 0.3),
-                         TVKM = rlnorm(1, log(4), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma = rlnorm(1, log(0.2), 0.3)))
+  output_dir = "depot_1cmt_linear_plus_mm/Stan/Fits/Output",
+  output_basename = "exp",
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+              TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega = abs(rnorm(5, 0, c(scale_omega_cl,
+                                        scale_omega_vc, 
+                                        scale_omega_vmax, 
+                                        scale_omega_km,
+                                        scale_omega_ka))),
+              sigma = abs(rnorm(1, 0, scale_sigma)))))
 
-fit$save_object(
-  "depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_exp.rds")
+fit$save_object("depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_exp.rds")
 
 fit$save_data_file(dir = "depot_1cmt_linear_plus_mm/Stan/Fits/Stan_Data",
                    basename = "exp", timestamp = FALSE, random = FALSE)
+
+
+
