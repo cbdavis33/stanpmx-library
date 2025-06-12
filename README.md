@@ -1,6 +1,6 @@
 # A Library of Stan Models and R Scripts for PMx
 
-Note: The workflow is a little out-of-date for most of these repositories. As of June 7, 2025, the following are fully updated
+Note: The workflow is a little out-of-date for most of these repositories. As of June 12, 2025, the following are fully updated
 
 -   depot_1cmt_linear
 
@@ -17,6 +17,10 @@ Note: The workflow is a little out-of-date for most of these repositories. As of
 -   bioav_iv_and_oral_1cmt_linear
 
 -   bioav_iv_and_oral_2cmt_linear
+
+-   depot_1cmt_mm
+
+-   depot_1cmt_linear_plus_mm
 
 The others have correct Stan code, so if you just want to fit, they're still good, but I haven't updated the post-processing and analyses you might want to do after fitting, yet. I'll be going through them and updating them as time allows.
 
