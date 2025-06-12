@@ -1,7 +1,7 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -27,16 +27,21 @@ priors <- model$sample(data = stan_data,
                        adapt_delta = 0.8,
                        refresh = 500,
                        max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                                              TVVC = rlnorm(1, log(10), 0.3),
-                                              TVVMAX = rlnorm(1, log(42), 0.3),
-                                              TVKM = rlnorm(1, log(4), 0.3),
-                                              TVKA = rlnorm(1, log(1), 0.3),
-                                              omega = rlnorm(5, log(0.3), 0.3),
-                                              sigma = rlnorm(1, log(0.2), 0.3)))
+                       init = function() 
+                         with(stan_data,
+                              list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+                                   TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+                                   TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+                                   TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+                                   TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+                                   omega = abs(rnorm(5, 0, c(scale_omega_cl, 
+                                                             scale_omega_vc, 
+                                                             scale_omega_vmax, 
+                                                             scale_omega_km,
+                                                             scale_omega_ka))),
+                                   sigma = abs(rnorm(1, 0, scale_sigma)))))
 
-fit <- read_rds(
-  "depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_exp.rds")
+fit <- read_rds("depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_exp.rds")
 
 draws_df <- fit$draws(format = "draws_df")
 
@@ -55,7 +60,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 (target_comparison_tv <- draws_all_df %>% 
     filter(str_detect(variable, "TV")) %>%
     mutate(variable = factor(variable, 
-                             levels = str_c("TV", c("CL", "VC", "VMAX", 
+                             levels = str_c("TV", c("CL", "VC", "VMAX",
                                                     "KM", "KA")))) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
@@ -71,7 +76,8 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     mutate(variable = factor(variable, 
                              levels = str_c("omega_", c("cl", "vc", "vmax", 
                                                         "km", "ka"))),
-           variable = fct_recode(variable, "omega[CL]" = "omega_cl",
+           variable = fct_recode(variable, 
+                                 "omega[CL]" = "omega_cl",
                                  "omega[VC]" = "omega_vc",
                                  "omega[VMAX]" = "omega_vmax",
                                  "omega[KM]" = "omega_km",
@@ -86,11 +92,12 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 
 (target_comparison_cor <- draws_all_df %>% 
     filter(str_detect(variable, "cor_")) %>% 
-    mutate(variable = factor(variable, 
-                             levels = c("cor_cl_vc", "cor_cl_vmax", 
-                                        "cor_cl_km", "cor_cl_ka",
-                                        "cor_vc_vmax", "cor_vc_km", "cor_vc_ka",
-                                        "cor_vmax_km", "cor_vmax_ka", "cor_km_ka")),
+    mutate(variable = 
+             factor(variable, 
+                    levels = c("cor_cl_vc", "cor_cl_vmax", "cor_cl_km", "cor_cl_ka",
+                               "cor_vc_vmax", "cor_vc_km", "cor_vc_ka",
+                               "cor_vmax_km", "cor_vmax_ka", 
+                               "cor_km_ka")),
            variable = fct_recode(variable, 
                                  "rho[paste(CL, ', ', VC)]" = "cor_cl_vc",
                                  "rho[paste(CL, ', ', VMAX)]" = "cor_cl_vmax",
@@ -108,13 +115,13 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     scale_fill_manual(name = "Distribution",
                       values = c("prior" = "blue", "posterior" = "red")) +
     theme(legend.position = "bottom") +
-    facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
+    facet_wrap(~ variable, scales = "free", nrow = 2, labeller = label_parsed))
 
 
-(target_comparison_error <- draws_all_df %>% 
-    filter(variable %in% c("sigma")) %>% 
+(target_comparison_sigma <- draws_all_df %>% 
+    filter(str_detect(variable, "sigma")) %>% 
     mutate(variable = factor(variable, 
-                             levels = c("sigma")),
+                             levels = "sigma"),
            variable = fct_recode(variable, "sigma" = "sigma")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
@@ -135,7 +142,7 @@ layout <- c(
 target_comparison_tv /
   target_comparison_omega /
   target_comparison_cor /
-  target_comparison_error +
+  target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 

@@ -1,8 +1,8 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
+library(mrgsolve)
 library(tidybayes)
 library(posterior)
 library(tidyverse)
@@ -21,13 +21,25 @@ nonmem_data <- read_csv(
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq)) # This value can be anything except NA. It'll be indexed away 
 
-# For this example, let's simulate 50 mg, 100 mg, 200 mg, 400 mg, 800 mg, 1600 mg 
-dosing_data <- mrgsolve::expand.ev(addl = 13, ii = 12, cmt = 1, 
-                                   amt = c(50, 100, 200, 400, 800, 1600), 
-                                   tinf = 0, evid = 1, mdv = 1) %>%
+# For this example, let's simulate 100 mg, 200 mg, 400 mg, 800 mg BID and
+# 600 mg, 800 mg, and 1600 mg QD
+dosing_data_bid <- expand.ev(addl = 13, ii = 12, 
+                             cmt = 1, amt = c(100, 200, 400, 800), ss = 0, 
+                             tinf = 0, evid = 1) %>%
   as_tibble() %>% 
-  mutate(ss = 0) %>% 
-  select(ID, time, everything())
+  select(ID, time, everything()) %>% 
+  mutate(frequency = "BID")
+
+dosing_data_qd <- expand.ev(addl = 6, ii = 24, 
+                            cmt = 1, amt = c(600, 800, 1600), ss = 0, 
+                            tinf = 0, evid = 1) %>%
+  as_tibble() %>% 
+  mutate(ID = max(dosing_data_bid$ID) + ID,
+         frequency = "QD") %>%  
+  select(ID, time, everything()) 
+
+dosing_data <- dosing_data_bid %>% 
+  bind_rows(dosing_data_qd) 
 
 t1 <- dosing_data %>% 
   realize_addl() %>% 
@@ -51,7 +63,12 @@ new_data <- bind_rows(replicate(max(dosing_data$ID), times_new,
   filter(time != 0) %>% 
   select(ID, time, everything()) %>% 
   bind_rows(dosing_data) %>% 
-  arrange(ID, time)
+  arrange(ID, time) %>% 
+  group_by(ID) %>% 
+  mutate(Dose = max(amt, na.rm = TRUE),
+         frequency = frequency[1],
+         regimen = str_c(Dose, " mg ", frequency)) %>% 
+  ungroup()
 
 
 # number of individuals in the original dataset
@@ -88,24 +105,26 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_plus_mm/Stan/Predict/depot_1cmt_linear_plus_mm_prop_predict_new_subjects.stan")
 
 preds <- model$generate_quantities(fit$draws() %>%
-                                     thin_draws(40),
+                                     thin_draws(1),
                                    data = stan_data,
                                    parallel_chains = 4,
                                    seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 
-regimens <- str_c(c(50, 100, 200, 400, 800, 1600), " mg")
+regimens <- c(str_c(c(100, 200, 400, 800), " mg BID"),
+              str_c(c(400, 800, 1600), " mg QD"))
 
 post_preds_summary <- preds_df %>%
-  spread_draws(ipred[i], pred[i], dv[i]) %>%
-  median_qi(ipred, pred, dv) %>%
+  spread_draws(epred_stan[i], epred[i]) %>%
+  median_qi(epred_stan, epred) %>%
   mutate(ID = new_data$ID[i],
          time = new_data$time[i]) %>%
   select(ID, time, everything(), -i) %>% 
@@ -113,8 +132,8 @@ post_preds_summary <- preds_df %>%
                           levels = regimens))
 
 tmp <- ggplot(post_preds_summary, aes(x = time, group = ID)) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+  geom_line(aes(y = epred_stan), linetype = 1, size = 1.15) +
+  geom_line(aes(y = epred), linetype = 2, size = 1.05) +
   ggforce::facet_wrap_paginate(~ ID, 
                                labeller = label_both,
                                nrow = 2, ncol = 3,
@@ -122,12 +141,12 @@ tmp <- ggplot(post_preds_summary, aes(x = time, group = ID)) +
 
 for(i in 1:ggforce::n_pages(tmp)){
   print(ggplot(post_preds_summary, aes(x = time, group = ID)) +
-          geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
+          geom_ribbon(aes(ymin = epred.lower, ymax = epred.upper),
                       fill = "blue", alpha = 0.25, show.legend = FALSE) +
-          geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
+          geom_ribbon(aes(ymin = epred.lower, ymax = epred.upper),
                       fill = "blue", alpha = 0.5, show.legend = FALSE) +
-          geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-          geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+          geom_line(aes(y = epred_stan), linetype = 1, size = 1.15) +
+          geom_line(aes(y = epred), linetype = 2, size = 1.05) +
           scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                              trans = "log10",
                              limits = c(NA, NA)) +
@@ -156,21 +175,21 @@ data <- read_csv(
   mutate(Dose = max(amt, na.rm = TRUE),
          mdv = evid) %>% 
   ungroup() %>% 
-  mutate(regimen = str_c(Dose, " mg"))
+  mutate(regimen = str_c(Dose, " mg BID"))
 
 
 post_preds_summary %>% 
-  filter(regimen %in% str_c(c(100, 200, 400, 800), " mg")) %>%
+  filter(regimen %in% str_c(c(100, 200, 400, 800), " mg BID")) %>%
   ggplot(aes(x = time, group = ID)) +
-  geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
-              fill = "blue", alpha = 0.25, show.legend = FALSE) +
-  geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
-              fill = "blue", alpha = 0.5, show.legend = FALSE) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+  geom_lineribbon(aes(y = epred, ymin = epred.lower, ymax = epred.upper),
+                  fill = "blue", color = "blue", linewidth = 1.05,
+                  alpha = 0.25, show.legend = FALSE) +
+  geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, ymax = epred_stan.upper),
+                  fill = "blue", color = "blue", linewidth = 1.15,
+                  alpha = 0.5, show.legend = FALSE) +
   geom_point(data = data %>% 
                mutate(regimen = factor(regimen, levels = regimens)) %>% 
-               filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"), 
+               filter(regimen %in% str_c(c(100, 200, 400, 800), " mg BID"), 
                       mdv == 0),
              mapping = aes(x = time, y = DV), color = "red", 
              inherit.aes = FALSE) +
@@ -189,4 +208,30 @@ post_preds_summary %>%
   facet_wrap(~ regimen, scales = "free_y")
 
 
+## Individual estimates (posterior mean)
+est_ind <- if(stan_data$want_auc_cmax){
+  preds_df %>%
+    spread_draws(c(CL, VC, VMAX, KM, KA, 
+                   auc_ss, c_max, t_max)[ID]) %>% 
+    mean_qi() %>% 
+    select(ID, CL, VC, VMAX, KM, KA, 
+           auc_ss, c_max, t_max) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168) %>% 
+                 select(ID, c_trough = "epred_stan") %>% 
+                 distinct(),
+               by = "ID")
+}else{
+  preds_df %>%
+    spread_draws(c(CL, VC, VMAX, KM, KA)[ID]) %>% 
+    mean_qi() %>% 
+    select(ID, CL, VC, VMAX, KM, KA) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168) %>% 
+                 select(ID, c_trough = "epred_stan") %>% 
+                 distinct(),
+               by = "ID")
+}
+
+est_ind
 

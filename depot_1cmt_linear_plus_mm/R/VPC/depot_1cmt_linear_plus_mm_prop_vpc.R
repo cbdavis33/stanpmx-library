@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
@@ -23,11 +22,15 @@ nonmem_data <- read_csv(
   mutate(DV = if_else(is.na(DV), 5555555, DV),    # This value can be anything except NA. It'll be indexed away 
          bloq = if_else(is.na(bloq), -999, bloq)) # This value can be anything except NA. It'll be indexed away 
 
+# VPCs can be done two ways, and they're the same up to Monte Carlo error
+#   1) Use the _predict_new_subjects.stan file to simulate new datasets with
+#        the same design. 
+#   2) Use the fitted object that has already done this in generated quantities
+
 new_data <- nonmem_data %>% 
   arrange(ID, time, evid) %>% 
   distinct(ID, time, .keep_all = TRUE) %>% 
   select(-DV)
-
 
 n_subjects <- new_data %>%  # number of individuals
   distinct(ID) %>% 
@@ -60,7 +63,8 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_plus_mm/Stan/Predict/depot_1cmt_linear_plus_mm_prop_predict_new_subjects.stan")
@@ -70,19 +74,19 @@ preds <- model$generate_quantities(fit,
                                    parallel_chains = 4,
                                    seed = 1234) 
 
-preds_df <- preds$draws(format = "draws_df") %>% drop_na()
+preds_df <- preds$draws(format = "draws_df")
 
 preds_col <- preds_df %>% 
-  spread_draws(pred[i]) %>% 
-  summarize(pred_mean = mean(pred)) %>% 
+  spread_draws(epred[i]) %>% 
+  summarize(epred_mean = mean(epred)) %>% 
   ungroup() %>% 
   bind_cols(new_data %>% 
               select(ID, time, evid)) %>% 
   filter(evid == 0) %>% 
-  select(ID, time, pred_mean, -i)
+  select(ID, time, epred_mean, -i)
 
 sim <- preds_df %>%
-  spread_draws(ipred[i], dv[i]) %>% 
+  spread_draws(epred_stan[i], epred[i]) %>% 
   ungroup() %>% 
   mutate(ID = new_data$ID[i],
          time = new_data$time[i],
@@ -90,27 +94,28 @@ sim <- preds_df %>%
          evid = new_data$evid[i],
          bloq = new_data$bloq[i]) %>% 
   filter(evid == 0) %>%
-  mutate(dv = if_else(bloq == 1, 0, dv)) %>% 
-  select(ID, sim = ".draw", time, ipred, dv) %>% 
+  # mutate(epred = if_else(bloq == 1, 0, epred)) %>% 
+  select(ID, sim = ".draw", time, epred) %>% 
   arrange(ID, sim, time) %>% 
   left_join(preds_col, by = c("ID", "time"))
 
 obs <- nonmem_data %>% 
-  select(ID, time, dv = "DV", amt, evid, mdv, bloq) %>% 
+  select(ID, time, dv = "DV", amt, evid, mdv, bloq, lloq) %>% 
   filter(evid == 0) %>% 
-  mutate(dv = if_else(bloq == 1, 0, dv)) %>% 
+  # mutate(dv = if_else(bloq == 1, 0, dv)) %>%
+  mutate(dv = if_else(bloq == 1, lloq, dv)) %>% 
   left_join(preds_col, by = c("ID", "time"))
 
 (p_vpc <- vpc(sim = sim, obs = obs,
               sim_cols = list(idv = "time",
-                              dv = "dv",
+                              dv = "epred",
                               id = "ID",
-                              pred = "pred",
+                              pred = "epred_mean",
                               sim = "sim"),
               obs_cols = list(dv = "dv",
                               idv = "time",
                               id = "ID",
-                              pred = "pred"),
+                              pred = "epred_mean"),
               show = list(obs_dv = TRUE, 
                           obs_ci = TRUE,
                           pi = TRUE,
@@ -120,7 +125,7 @@ obs <- nonmem_data %>%
                           sim_median = TRUE,
                           sim_median_ci = TRUE),
               log_y = TRUE,
-              lloq = 0.1) +
+              lloq = 1) +
     # scale_y_continuous(name = "Drug Conc. (ug/mL)",
     #                    trans = "identity") +
     scale_x_continuous(name = "Time (h)",
@@ -130,14 +135,107 @@ obs <- nonmem_data %>%
 
 (p_pcvpc <- vpc(sim = sim, obs = obs,
                 sim_cols = list(idv = "time",
-                                dv = "dv",
+                                dv = "epred",
                                 id = "ID",
-                                pred = "pred_mean",
+                                pred = "epred_mean",
                                 sim = "sim"),
                 obs_cols = list(dv = "dv",
                                 idv = "time",
                                 id = "ID",
-                                pred = "pred_mean"),
+                                pred = "epred_mean"),
+                pred_corr = TRUE,
+                show = list(obs_dv = TRUE, 
+                            obs_ci = TRUE,
+                            pi = TRUE,
+                            pi_as_area = FALSE,
+                            pi_ci = TRUE,
+                            obs_median = TRUE,
+                            sim_median = TRUE,
+                            sim_median_ci = TRUE),
+                log_y = TRUE) +
+    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
+    #                    trans = "log10") +
+    scale_x_continuous(name = "Time (h)",
+                       breaks = seq(0, 168, by = 24),
+                       labels = seq(0, 168, by = 24)) +
+    theme_bw())
+
+p_vpc + 
+  p_pcvpc
+
+
+## Alternatively, use the output in the fitted object 
+
+draws_df <- fit$draws(format = "draws_df")
+
+preds_col <- draws_df %>% 
+  spread_draws(epred[i]) %>% 
+  summarize(epred_mean = mean(epred)) %>% 
+  ungroup() %>% 
+  bind_cols(nonmem_data %>% 
+              filter(evid == 0) %>% 
+              select(ID, time, evid)) %>% 
+  filter(evid == 0) %>% 
+  select(ID, time, epred_mean, -i)
+
+sim <- draws_df %>%
+  spread_draws(epred[i]) %>% 
+  ungroup() %>% 
+  mutate(ID = nonmem_data$ID[nonmem_data$evid == 0][i],
+         time = nonmem_data$time[nonmem_data$evid == 0][i],
+         mdv = nonmem_data$mdv[nonmem_data$evid == 0][i],
+         evid = nonmem_data$evid[nonmem_data$evid == 0][i],
+         bloq = nonmem_data$bloq[nonmem_data$evid == 0][i]) %>% 
+  filter(evid == 0) %>%
+  # mutate(epred = if_else(bloq == 1, 0, epred)) %>% 
+  select(ID, sim = ".draw", time, epred) %>% 
+  arrange(ID, sim, time) %>% 
+  left_join(preds_col, by = c("ID", "time"))
+
+obs <- nonmem_data %>% 
+  select(ID, time, dv = "DV", amt, evid, mdv, bloq, lloq) %>% 
+  filter(evid == 0) %>% 
+  # mutate(dv = if_else(bloq == 1, 0, dv)) %>%
+  mutate(dv = if_else(bloq == 1, lloq, dv)) %>% 
+  left_join(preds_col, by = c("ID", "time"))
+
+(p_vpc <- vpc(sim = sim, obs = obs,
+              sim_cols = list(idv = "time",
+                              dv = "epred",
+                              id = "ID",
+                              pred = "epred_mean",
+                              sim = "sim"),
+              obs_cols = list(dv = "dv",
+                              idv = "time",
+                              id = "ID",
+                              pred = "epred_mean"),
+              show = list(obs_dv = TRUE, 
+                          obs_ci = TRUE,
+                          pi = TRUE,
+                          pi_as_area = FALSE,
+                          pi_ci = TRUE,
+                          obs_median = TRUE,
+                          sim_median = TRUE,
+                          sim_median_ci = TRUE),
+              log_y = TRUE,
+              lloq = 1) +
+    # scale_y_continuous(name = "Drug Conc. (ug/mL)",
+    #                    trans = "identity") +
+    scale_x_continuous(name = "Time (h)",
+                       breaks = seq(0, 168, by = 24),
+                       labels = seq(0, 168, by = 24)) +
+    theme_bw())
+
+(p_pcvpc <- vpc(sim = sim, obs = obs,
+                sim_cols = list(idv = "time",
+                                dv = "epred",
+                                id = "ID",
+                                pred = "epred_mean",
+                                sim = "sim"),
+                obs_cols = list(dv = "dv",
+                                idv = "time",
+                                id = "ID",
+                                pred = "epred_mean"),
                 pred_corr = TRUE,
                 show = list(obs_dv = TRUE, 
                             obs_ci = TRUE,

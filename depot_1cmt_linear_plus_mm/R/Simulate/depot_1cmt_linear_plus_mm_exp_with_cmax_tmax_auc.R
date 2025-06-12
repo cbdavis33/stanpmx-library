@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
@@ -28,6 +27,9 @@ sigma <- 0.2
 
 n_subjects_per_dose <- 6
 
+# dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 13, ii = 12, 
+#                          cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0, 
+#                          evid = 1) %>%
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 13, ii = 12, 
                          cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0, 
                          evid = 1) %>%
@@ -87,7 +89,7 @@ stan_data <- list(n_subjects = n_subjects,
                   ss = nonmem_data_simulate$SS,
                   subj_start = subj_start,
                   subj_end = subj_end,
-                  TVCL = TVCL, 
+                  TVCL = TVCL,
                   TVVC = TVVC,
                   TVVMAX = TVVMAX,
                   TVKM = TVKM,
@@ -101,28 +103,43 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma = sigma,
                   solver = 1, # rk45 = 1, bdf = 2
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
-  "depot_1cmt_linear_plus_mm/Stan/Simulate/depot_1cmt_linear_plus_mm_exp_with_cmax_tmax_auc.stan") 
+  "depot_1cmt_linear_plus_mm/Stan/Simulate/depot_1cmt_linear_plus_mm_exp_with_cmax_tmax_auc.stan")
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               seed = 1123,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "VMAX", "KM", "KA",
-                                     "auc_t1_t2", "c_max", "t_max")) %>% 
-  spread_draws(c(CL, VC, VMAX, KM, KA, 
-                 auc_t1_t2, c_max, t_max)[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, VMAX, KM, KA, auc_t1_t2, c_max, t_max)
+params_ind <- if(stan_data$want_auc_cmax){
+  
+  simulated_data$draws(c("CL", "VC", "VMAX", "KM", "KA",
+                         "auc_t1_t2", "c_max", "t_max")) %>% 
+    spread_draws(c(CL, VC, VMAX, KM, KA, 
+                   auc_t1_t2, c_max, t_max)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, VMAX, KM, KA, auc_t1_t2, c_max, t_max)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "VMAX", "KM", "KA")) %>% 
+    spread_draws(c(CL, VC, VMAX, KM, KA)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, VMAX, KM, KA)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -132,7 +149,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
              by = "i") %>%
   select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME, 
          DV = "dv", IPRED = "ipred") %>% 
-  mutate(LLOQ = 0.1, 
+  mutate(LLOQ = 0.5, 
          BLOQ = case_when(EVID == 1 ~ NA_real_,
                           DV <= LLOQ ~ 1,
                           DV > LLOQ ~ 0,
@@ -156,15 +173,15 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
+
 
 data %>%
   select(-IPRED) %>%
-  write_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp.csv", 
+  write_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp.csv",
             na = ".")
 
 params_ind %>%
-  write_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp_params_ind.csv") 
+  write_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_exp_params_ind.csv",
+            na = ".")
 
 

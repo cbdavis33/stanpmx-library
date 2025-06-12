@@ -1,14 +1,14 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_prop.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "depot_1cmt_linear_plus_mm/Data/depot_1cmt_linear_plus_mm_prop.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -34,7 +34,7 @@ nonmem_data %>%
     scale_color_discrete(name = "Dose (mg)") +
     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                        limits = c(NA, NA),
-                       trans = "log10") +
+                       trans = "identity") +
     scale_x_continuous(name = "Time (d)",
                        breaks = seq(0, 216, by = 24),
                        labels = seq(0, 216/24, by = 24/24),
@@ -42,15 +42,11 @@ nonmem_data %>%
     theme_bw(18) +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
-          axis.line = element_line(size = 2),
+          axis.line = element_line(linewidth = 2),
           legend.position = "bottom"))
 
-# p1 +
-#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
+p1 +
+  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -95,11 +91,11 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 0.6,
-                  location_tvvc = 8,
-                  location_tvvmax = 45,
+                  location_tvcl = 0.7,
+                  location_tvvc = 15,
+                  location_tvvmax = 40,
                   location_tvkm = 6,
-                  location_tvka = 0.8,
+                  location_tvka = 0.9,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_tvvmax = 1,
@@ -113,6 +109,7 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
+                  no_gq_predictions = 0,
                   solver = 1)
 
 model <- cmdstan_model(
@@ -126,20 +123,27 @@ fit_rk45 <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 100,
   adapt_delta = 0.8,
   refresh = 100,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVVMAX = rlnorm(1, log(42), 0.3),
-                         TVKM = rlnorm(1, log(4), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+              TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega = abs(rnorm(5, 0, c(scale_omega_cl,
+                                        scale_omega_vc, 
+                                        scale_omega_vmax, 
+                                        scale_omega_km,
+                                        scale_omega_ka))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit_rk45$save_object(
   "depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_prop_rk45.rds")
+
 
 stan_data$solver <- 2
 fit_bdf <- model$sample(
@@ -149,41 +153,23 @@ fit_bdf <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 100,
   adapt_delta = 0.8,
-  refresh = 50,
+  refresh = 100,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVVMAX = rlnorm(1, log(42), 0.3),
-                         TVKM = rlnorm(1, log(4), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVVMAX = rlnorm(1, log(location_tvvmax), scale_tvvmax),
+              TVKM = rlnorm(1, log(location_tvkm), scale_tvkm),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega = abs(rnorm(5, 0, c(scale_omega_cl,
+                                        scale_omega_vc, 
+                                        scale_omega_vmax, 
+                                        scale_omega_km,
+                                        scale_omega_ka))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit_bdf$save_object(
   "depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_prop_bdf.rds")
-
-stan_data$solver <- 3
-fit_adams <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(10), 0.3),
-                         TVVMAX = rlnorm(1, log(42), 0.3),
-                         TVKM = rlnorm(1, log(4), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(5, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
-
-fit_adams$save_object(
-  "depot_1cmt_linear_plus_mm/Stan/Fits/depot_1cmt_linear_plus_mm_prop_adams.rds")
-
