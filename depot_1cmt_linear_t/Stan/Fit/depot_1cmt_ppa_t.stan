@@ -7,19 +7,11 @@
 //   faster than the analytical solution for this model)
 // Implements threading for within-chain parallelization 
 // Deals with BLOQ values by the "CDF trick" (M4)
-// Since we have a normal distribution on the error, but the DV must be > 0, it
-//   truncates the likelihood below at 0
-// For PPC, it generates values from a normal that is truncated below at 0
+// Since we have a Student's-t distribution on the error, but the DV must 
+//   be > 0, it generates values from a t that is truncated below at 0
+// For PPC, it generates values from a Student's-t that is truncated below at 0
 
 functions{
-
-  array[] int sequence(int start, int end) { 
-    array[end - start + 1] int seq;
-    for (n in 1:num_elements(seq)) {
-      seq[n] = n + start - 1;
-    }
-    return seq; 
-  } 
   
   int num_between(int lb, int ub, array[] int y){
     
@@ -45,7 +37,7 @@ functions{
     return result;
   }
   
-  vector find_between_vec(int lb, int ub, array[] int idx, vector y) {
+  vector find_between(int lb, int ub, array[] int idx, vector y) {
     
     vector[num_between(lb, ub, idx)] result;
     int n = 1;
@@ -121,15 +113,6 @@ functions{
     return mu + sigma * n_t_q(z, nu);
   }
   
-  real normal_lb_rng(real mu, real sigma, real lb){
-    
-    real p_lb = normal_cdf(lb | mu, sigma);
-    real u = uniform_rng(p_lb, 1);
-    real y = mu + sigma * inv_Phi(u);
-    return y; 
-
-  }
-  
   real partial_sum_lpmf(array[] int seq_subj, int start, int end,
                         vector dv_obs, array[] int dv_obs_id, array[] int i_obs,
                         array[] real amt, array[] int cmt, array[] int evid, 
@@ -137,8 +120,8 @@ functions{
                         array[] int addl, array[] int ss,
                         array[] int subj_start, array[] int subj_end, 
                         vector CL, vector VC, vector KA, 
-                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a, 
-                        real nu,
+                        real sigma_sq_p, real sigma_sq_a, real sigma_p_a,
+                        real nu, 
                         vector lloq, array[] int bloq,
                         int n_random, int n_subjects, int n_total,
                         array[] real bioav, array[] real tlag, int n_cmt){
@@ -153,8 +136,8 @@ functions{
     array[n_obs_slice] int i_obs_slice = find_between(subj_start[start], 
                                                       subj_end[end], i_obs);
                                                 
-    vector[n_obs_slice] dv_obs_slice = find_between_vec(start, end, 
-                                                        dv_obs_id, dv_obs);
+    vector[n_obs_slice] dv_obs_slice = find_between(start, end, 
+                                                    dv_obs_id, dv_obs);
     
     vector[n_obs_slice] ipred_slice;
     
@@ -166,7 +149,6 @@ functions{
     
       int j = n + start - 1; // j is the ID of the current subject
       
-
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
       K[1, 1] = -KA[j];
       K[2, 1] = KA[j];
@@ -191,14 +173,12 @@ functions{
     ipred_slice = dv_ipred[i_obs_slice];
     
     for(i in 1:n_obs_slice){
-      
       real ipred_tmp = ipred_slice[i];
       real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
                             2*ipred_tmp*sigma_p_a);
-      
       if(bloq_slice[i] == 1){
         ptarget += log_diff_exp(student_t_lcdf(lloq_slice[i] | nu, ipred_tmp, 
-                                                            sigma_tmp),
+                                                               sigma_tmp),
                                 student_t_lcdf(0.0 | nu, ipred_tmp, sigma_tmp)) -
                    student_t_lccdf(0.0 | nu, ipred_tmp, sigma_tmp); 
       }else{
@@ -277,10 +257,10 @@ transformed data{
   
   array[n_random] real scale_omega = {scale_omega_cl, scale_omega_vc, 
                                       scale_omega_ka}; 
-                                      
-  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a}; 
   
-  array[n_subjects] int seq_subj = sequence(1, n_subjects); // reduce_sum over subjects
+  array[2] real scale_sigma = {scale_sigma_p, scale_sigma_a};
+  
+  array[n_subjects] int seq_subj = linspaced_int_array(n_subjects, 1, n_subjects); // reduce_sum over subjects
   
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);
@@ -330,7 +310,7 @@ transformed parameters{
 
     matrix[n_subjects, n_random] theta =
                           (rep_matrix(typical_values, n_subjects) .* exp(eta));
-                          
+    
     matrix[2, 2] R_Sigma = multiply_lower_tri_self_transpose(L_Sigma);
     matrix[2, 2] Sigma = quad_form_diag(R_Sigma, sigma);
     
@@ -395,17 +375,16 @@ generated quantities{
   real omega_cl_ka;
   real omega_vc_ka;
 
-  vector[n_obs] ipred;
-  vector[n_obs] pred;
-  vector[n_obs] dv_ppc;
-  vector[n_obs] log_lik;
-  vector[n_obs] res;
-  vector[n_obs] wres;
-  vector[n_obs] ires;
-  vector[n_obs] iwres;
+  vector[no_gq_predictions ? 0 : n_obs] pred;
+  vector[no_gq_predictions ? 0 : n_obs] epred_stan;
+  vector[no_gq_predictions ? 0 : n_obs] ipred;
+  vector[no_gq_predictions ? 0 : n_obs] epred;
+  vector[no_gq_predictions ? 0 : n_obs] dv_ppc;
+  vector[no_gq_predictions ? 0 : n_obs] log_lik;
+  vector[no_gq_predictions ? 0 : n_obs] iwres;
  
   {
-
+    
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
 
@@ -418,18 +397,47 @@ generated quantities{
     omega_vc_ka = Omega[2, 3];
     
   }
-
+  
   if(no_gq_predictions == 0){
+    
+    vector[n_subjects] CL_new;
+    vector[n_subjects] VC_new;
+    vector[n_subjects] KA_new;
+    vector[n_subjects] KE_new;
     
     vector[n_total] dv_pred;
     matrix[n_total, n_cmt] x_pred;
+    vector[n_total] dv_epred;
+    matrix[n_total, n_cmt] x_epred;
     vector[n_total] dv_ipred;
     matrix[n_total, n_cmt] x_ipred;
+    
+    matrix[n_subjects, n_random] eta_new;
+    matrix[n_subjects, n_random] theta_new;
+    
+    for(i in 1:n_subjects){
+      eta_new[i, ] = multi_normal_cholesky_rng(rep_vector(0, n_random),
+                                               diag_pre_multiply(omega, L))';
+    }
+    theta_new = (rep_matrix(to_row_vector({TVCL, TVVC, TVKA}), n_subjects) .* exp(eta_new));
 
     for(j in 1:n_subjects){
+    
+      row_vector[n_random] theta_j_new = theta_new[j]; // access the parameters for subject j's epred
       
+      real cl_p = TVCL;
+      real vc_p = TVVC;
+      real ka_p = TVKA;
+      
+      CL_new[j] = theta_j_new[1];
+      VC_new[j] = theta_j_new[2];
+      KA_new[j] = theta_j_new[3];
+      KE_new[j] = CL_new[j]/VC_new[j];
+    
       matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
-      matrix[n_cmt, n_cmt] K_tv = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_epred = rep_matrix(0, n_cmt, n_cmt);
+      matrix[n_cmt, n_cmt] K_p = rep_matrix(0, n_cmt, n_cmt);
+      
       K[1, 1] = -KA[j];
       K[2, 1] = KA[j];
       K[2, 2] = -CL[j]/VC[j];
@@ -444,10 +452,25 @@ generated quantities{
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
                          K, bioav, tlag)';
-                           
-      K_tv[1, 1] = -TVKA;
-      K_tv[2, 1] = TVKA;
-      K_tv[2, 2] = -TVCL/TVVC;
+                         
+      K_epred[1, 1] = -KA_new[j];
+      K_epred[2, 1] = KA_new[j];
+      K_epred[2, 2] = -CL_new[j]/VC_new[j];
+      
+      x_epred[subj_start[j]:subj_end[j], ] =
+        pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         K_epred, bioav, tlag)';
+                         
+      K_p[1, 1] = -ka_p;
+      K_p[2, 1] = ka_p;
+      K_p[2, 2] = -cl_p/vc_p;
 
       x_pred[subj_start[j]:subj_end[j],] =
         pmx_solve_linode(time[subj_start[j]:subj_end[j]],
@@ -458,27 +481,34 @@ generated quantities{
                          cmt[subj_start[j]:subj_end[j]],
                          addl[subj_start[j]:subj_end[j]],
                          ss[subj_start[j]:subj_end[j]],
-                         K_tv, bioav, tlag)';
+                         K_p, bioav, tlag)';
       
       dv_ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
+        
+      dv_epred[subj_start[j]:subj_end[j]] =
+        x_epred[subj_start[j]:subj_end[j], 2] ./ VC_new[j];
       
       dv_pred[subj_start[j]:subj_end[j]] =
-        x_pred[subj_start[j]:subj_end[j], 2] ./ TVVC;
+        x_pred[subj_start[j]:subj_end[j], 2] ./ vc_p;
       
     }
 
     pred = dv_pred[i_obs];
+    epred_stan = dv_epred[i_obs];
     ipred = dv_ipred[i_obs];
-
-    res = dv_obs - pred;
-    ires = dv_obs - ipred;
 
     for(i in 1:n_obs){
       real ipred_tmp = ipred[i];
       real sigma_tmp = sqrt(square(ipred_tmp) * sigma_sq_p + sigma_sq_a + 
                             2*ipred_tmp*sigma_p_a);
-      dv_ppc[i] = student_t_lub_rng(nu, ipred_tmp, sigma_tmp, 0.0, positive_infinity());
+      real epred_tmp = epred_stan[i];
+      real sigma_tmp_e = sqrt(square(epred_tmp) * sigma_sq_p + sigma_sq_a + 
+                              2*epred_tmp*sigma_p_a);
+      dv_ppc[i] = student_t_lub_rng(nu, ipred_tmp, sigma_tmp, 0.0, 
+                                    positive_infinity());
+      epred[i] = student_t_lub_rng(nu, epred_tmp, sigma_tmp_e, 0.0, 
+                                   positive_infinity());
       if(bloq_obs[i] == 1){
         log_lik[i] = log_diff_exp(student_t_lcdf(lloq_obs[i] | nu, ipred_tmp, sigma_tmp),
                                   student_t_lcdf(0.0 | nu, ipred_tmp, sigma_tmp)) -
@@ -487,8 +517,7 @@ generated quantities{
         log_lik[i] = student_t_lpdf(dv_obs[i] | nu, ipred_tmp, sigma_tmp) -
                      student_t_lccdf(0.0 | nu, ipred_tmp, sigma_tmp);
       }
-      wres[i] = res[i]/(sigma_tmp*sqrt(nu/(nu - 2)));
-      iwres[i] = ires[i]/(sigma_tmp*sqrt(nu/(nu - 2)));
+      iwres[i] = (dv_obs[i] - ipred_tmp)/(sigma_tmp*sqrt(nu/(nu - 2)));
     }
   }
 }

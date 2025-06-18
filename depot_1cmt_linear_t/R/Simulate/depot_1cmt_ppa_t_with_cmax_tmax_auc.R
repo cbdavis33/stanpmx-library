@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(cmdstanr)
@@ -99,28 +98,39 @@ stan_data <- list(n_subjects = n_subjects,
                   cor_p_a = cor_p_a,
                   nu = nu,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  solver = 4)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_t/Stan/Simulate/depot_1cmt_ppa_t_with_cmax_tmax_auc.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               seed = 654321,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA", 
-                                     "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
-  spread_draws(CL[i], VC[i], KA[i], 
-               auc_t1_t2[i], c_max[i], t_max[i], t_half[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, KA, auc_t1_t2, c_max, t_max, t_half)
+
+params_ind <- if(stan_data$solver == 4){
+  
+  simulated_data$draws(c("CL", "VC", "KA",
+                         "auc_t1_t2", "c_max", "t_max", "t_half")) %>% 
+    spread_draws(c(CL, VC, KA,
+                   auc_t1_t2, c_max, t_max, t_half)[ID]) %>%
+    ungroup() %>%
+    select(ID, CL, VC, KA, auc_t1_t2, c_max, t_max, t_half)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "KA")) %>% 
+    spread_draws(c(CL, VC, KA)[ID]) %>%
+    ungroup() %>%
+    select(ID, CL, VC, KA)
+  
+}
+
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -128,7 +138,7 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
   inner_join(nonmem_data_simulate %>% 
                mutate(i = 1:n()),
              by = "i") %>%
-  select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME, 
+  select(ID, AMT, II, ADDL, RATE, CMT, EVID, SS, TIME,
          DV = "dv", IPRED = "ipred") %>% 
   mutate(LLOQ = 1, 
          BLOQ = case_when(EVID == 1 ~ NA_real_,
@@ -138,7 +148,8 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
          DV = if_else(EVID == 1 | BLOQ == 1, NA_real_, DV),
          MDV = if_else(is.na(DV), 1, 0)) %>% 
   relocate(DV, .after = last_col()) %>% 
-  relocate(TIME, .before = DV)
+  relocate(TIME, .before = DV) %>% 
+  rename_with(toupper, .cols = everything())
 
 (p_1 <- ggplot(data %>% 
                  group_by(ID) %>% 
@@ -154,15 +165,18 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
+
+prop_or_ppa <- if_else(sigma_a == 0, "prop", "ppa")
 
 data %>%
   select(-IPRED) %>%
-  # write_csv("depot_1cmt_linear_t/Data/depot_1cmt_prop_t.csv", na = ".")
-  write_csv("depot_1cmt_linear_t/Data/depot_1cmt_ppa_t.csv", na = ".")
+  write_csv(str_c("depot_1cmt_linear_t/Data/depot_1cmt_",
+                  prop_or_ppa, "_t.csv"),
+            na = ".")
 
 params_ind %>%
-  # write_csv("depot_1cmt_linear_t/Data/depot_1cmt_prop_t_params_ind.csv")
-  write_csv("depot_1cmt_linear_t/Data/depot_1cmt_ppa_t_params_ind.csv")
+  write_csv(str_c("depot_1cmt_linear_t/Data/depot_1cmt_t_",
+                  prop_or_ppa, "_t_params_ind.csv"),
+            na = ".")
+
 
