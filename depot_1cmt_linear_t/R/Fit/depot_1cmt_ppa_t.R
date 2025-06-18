@@ -111,13 +111,13 @@ stan_data <- list(n_subjects = n_subjects,
                   lb_nu = 2,
                   scale_nu = 10,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model("depot_1cmt_linear_t/Stan/Fit/depot_1cmt_ppa_t.stan",
                        cpp_options = list(stan_threads = TRUE))
 
 fit <- model$sample(data = stan_data,
-                    seed = 11235,
+                    seed = 112358,
                     chains = 4,
                     parallel_chains = 4,
                     threads_per_chain = parallel::detectCores()/4,
@@ -126,19 +126,22 @@ fit <- model$sample(data = stan_data,
                     adapt_delta = 0.8,
                     refresh = 500,
                     max_treedepth = 10,
-                    output_dir = "depot_1cmt_linear/Stan/Fits/Output",
+                    output_dir = "depot_1cmt_linear_t/Stan/Fits/Output",
                     output_basename = "ppa",
-                    init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                           TVVC = rlnorm(1, log(8), 0.3),
-                                           TVKA = rlnorm(1, log(0.8), 0.3),
-                                           omega = rlnorm(3, log(0.3), 0.3),
-                                           sigma = rlnorm(2, log(0.4), 0.3),
-                                           nu = stan_data$lb_nu + 
-                                             rlnorm(1, log(2), 0.3)))
+                    init = function() 
+                      with(stan_data,
+                           list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/100),
+                                TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/100),
+                                TVKA = rlnorm(1, log(location_tvka), scale_tvka/100),
+                                omega = abs(rnorm(3, 0, c(scale_omega_cl,
+                                                          scale_omega_vc,
+                                                          scale_omega_ka))),
+                                sigma = abs(rnorm(2, 0, c(scale_sigma_p,
+                                                          scale_sigma_a))),
+                                nu = stan_data$lb_nu + 
+                                  abs(rnorm(1, 0, scale_nu)))))
 
 fit$save_object("depot_1cmt_linear_t/Stan/Fits/depot_1cmt_ppa_t.rds")
 
 fit$save_data_file(dir = "depot_1cmt_linear_t/Stan/Fits/Stan_Data",
-                   basename = "ppa_t", timestamp = FALSE, random = FALSE)
-
-
+                   basename = "ppa", timestamp = FALSE, random = FALSE)
