@@ -1,14 +1,14 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("zero_into_depot_1cmt_linear/Data/zero_into_depot_1cmt_exp.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "zero_into_depot_1cmt_linear/Data/zero_into_depot_1cmt_exp.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -47,9 +47,6 @@ nonmem_data %>%
 # 
 # p1 +
 #   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 
 n_subjects <- nonmem_data %>%  # number of individuals
@@ -109,30 +106,36 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma = 0.5,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model(
   "zero_into_depot_1cmt_linear/Stan/Fit/zero_into_depot_1cmt_exp.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit <- model$sample(data = stan_data,
-                    seed = 11235,
-                    chains = 4,
-                    parallel_chains = 4,
-                    threads_per_chain = parallel::detectCores()/4,
-                    iter_warmup = 500,
-                    iter_sampling = 1000,
-                    adapt_delta = 0.8,
-                    refresh = 500,
-                    max_treedepth = 10,
-                    output_dir = "zero_into_depot_1cmt_linear/Stan/Fits/Output",
-                    output_basename = "exp",
-                    init = function() list(TVCL = rlnorm(1, log(1), 0.3),
-                                           TVVC = rlnorm(1, log(20), 0.3),
-                                           TVKA = rlnorm(1, log(2), 0.3),
-                                           TVDUR = rlnorm(1, log(2), 0.3),
-                                           omega = rlnorm(4, log(0.3), 0.3),
-                                           sigma = rlnorm(1, log(0.2), 0.3)))
+fit <- model$sample(
+  data = stan_data,
+  seed = 112358,
+  chains = 4,
+  parallel_chains = 4,
+  threads_per_chain = parallel::detectCores()/4,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  adapt_delta = 0.8,
+  refresh = 500,
+  max_treedepth = 10,
+  output_dir = "zero_into_depot_1cmt_linear/Stan/Fits/Output",
+  output_basename = "exp",
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVDUR = rlnorm(1, log(location_tvdur), scale_tvdur),
+              omega = abs(rnorm(4, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_ka,
+                                        scale_omega_dur))),
+              sigma = abs(rnorm(1, 0, scale_sigma)))))
 
 fit$save_object(
   "zero_into_depot_1cmt_linear/Stan/Fits/zero_into_depot_1cmt_exp.rds")
