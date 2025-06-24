@@ -1,6 +1,6 @@
 # A Library of Stan Models and R Scripts for PMx
 
-Note: The workflow is a little out-of-date for most of these repositories. As of June 18, 2025, the following are fully updated
+Note: The workflow is a little out-of-date for most of these repositories. As of June 23, 2025, the following are fully updated
 
 -   depot_1cmt_linear
 
@@ -25,6 +25,8 @@ Note: The workflow is a little out-of-date for most of these repositories. As of
 -   depot_1cmt_linear_ir1
 
 -   depot_1cmt_linear_t - Same as depot_1cmt_linear, but with Student's-t distributed residual variability
+
+-   zero_into_depot_1cmt_linear - Zero-order distributive delay (like an infusion into the gut) to bring about a delayed absorption. This allows the analytical/matrix-exponential solution to be used, so it's still fast 
 
 The others have correct Stan code, so if you just want to fit, they're still good, but I haven't updated the post-processing and analyses you might want to do after fitting, yet. I'll be going through them and updating them as time allows.
 
