@@ -90,11 +90,8 @@ parameters{
 }
 generated quantities{
   
-  vector[n_time_new] pred;       // f(TVs, x, eta = 0) 
   vector[n_time_new] epred_stan; // f(TVs, x, eta = eta_new), eta_new ~ multi_normal(0, Omega) 
   vector[n_time_new] epred;      // epred_stan + error
-  vector[n_time_new] ipred;      // f(TVs, x, eta = eta_i), eta_i are etas for observed subjects
-  vector[n_time_new] dv;         // ipred + error
   
   vector[want_auc_cmax ? n_time_new : 0] auc;     // AUC from 0 to t
   vector[want_auc_cmax ? n_subjects_new : 0] auc_ss;  // AUC from t1 up to t2 (AUC_ss)
