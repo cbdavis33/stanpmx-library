@@ -4,15 +4,39 @@
 //   a delayed absorption
 // IIV on CL, VC, Q, VP, KA, DUR (full covariance matrix)
 // exponential error - DV = IPRED*exp(eps)
-// General ODE solution using Torsten
-// Output includes individual Cmax over the whole time period, Tmax between t1 
-//   and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like a 
-//   dosing interval)
+// User's choice of analytical, matrix-exponential, ODE, or ODE with AUC, Cmax, 
+//   Tmax
+// If solver == 4 (ODE with AUC, Cmax, Tmax), output includes individual Cmax 
+//   over the whole time period, Tmax between t1 and t2, AUC since 0 for every 
+//   timepoint, and AUC between t1 and t2 (like a dosing interval)
 
 functions{
   
   vector depot_2cmt_ode(real t, vector y, array[] real params, 
                         array[] real x_r, array[] int x_i){
+    
+    real cl = params[1];
+    real vc = params[2];
+    real q = params[3];
+    real vp = params[4];
+    real ka = params[5];
+    
+    real ke = cl/vc;
+    real k_cp = q/vc;
+    real k_pc = q/vp;
+    
+    vector[3] dydt;
+
+    dydt[1] = -ka*y[1];                                // depot
+    dydt[2] = ka*y[1] - (ke + k_cp)*y[2] + k_pc*y[3];  // central
+    dydt[3] = k_cp*y[2] - k_pc*y[3];                   // peripheral
+    
+    return dydt;
+    
+  }
+  
+  vector depot_2cmt_with_auc_ode(real t, vector y, array[] real params, 
+                                 array[] real x_r, array[] int x_i){
     
     real cl = params[1];
     real vc = params[2];
@@ -42,6 +66,7 @@ functions{
     dydt[7] = z;                                   // t_max
     
     return dydt;
+  
   }
   
 }
@@ -83,6 +108,8 @@ data{
   
   real<lower = 0> sigma;
   
+  int<lower = 1, upper = 4> solver; // 1 = analytical, 2 = mat-exp, 3 = rk45, 4 = rk45 with AUC, Cmax, Tmax
+  
   real<lower = 0> t_1;
   real<lower = t_1> t_2;
   
@@ -90,9 +117,9 @@ data{
 transformed data{
   
   int n_random = 6;
-  int n_cmt = 7;
+  int n_cmt = (solver == 4) ? 7 : 3;
 
-  vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
+  vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka, 
                             omega_dur]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
@@ -127,7 +154,7 @@ generated quantities{
   
   {
   
-    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVQ, TVVP, TVKA,
+    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVQ, TVVP, TVKA, 
                                                  TVDUR});
     
     matrix[n_random, n_subjects] eta;   
@@ -137,6 +164,8 @@ generated quantities{
     
     vector[n_subjects] alpha;
     vector[n_subjects] beta;
+    
+    array[n_total] real rate;
     
     for(i in 1:n_subjects){
       eta[, i] = multi_normal_cholesky_rng(rep_vector(0, n_random),
@@ -155,38 +184,95 @@ generated quantities{
                  sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
     beta = 0.5*(CL./VC + Q./VC + Q./VP - 
                  sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+                 
+    t_half_alpha = log(2)/alpha;
+    t_half_terminal = log(2)/beta;
     
     for(j in 1:n_subjects){
       
-      array[subj_end[j] - subj_start[j] + 1] real rate = 
+      rate[subj_start[j]:subj_end[j]] =  
               to_array_1d(to_vector(amt[subj_start[j]:subj_end[j]]) ./ DUR[j]);
       
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(depot_2cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate,
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       {CL[j], VC[j], Q[j], VP[j], KA[j]}, 
-                       bioav, tlag, x_r)';
+      if(solver == 1){
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_twocpt(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {CL[j], Q[j], VC[j], VP[j], KA[j]},
+                           bioav, tlag)';  
+        
+      }else if(solver == 2){
+        
+        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+  
+        K[1, 1] = -KA[j];
+        K[2, 1] = KA[j];
+        K[2, 2] = -((CL[j] + Q[j])/VC[j]);
+        K[2, 3] = Q[j]/VP[j];
+        K[3, 2] = Q[j]/VC[j];
+        K[3, 3] = -Q[j]/VP[j];
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           K, bioav, tlag)';
+        
+      }else if(solver == 3){
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(depot_2cmt_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], Q[j], VP[j], KA[j]}, 
+                         bioav, tlag, x_r)';
+        
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(depot_2cmt_with_auc_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], Q[j], VP[j], KA[j]}, 
+                         bioav, tlag, x_r)';
+                         
+        auc[subj_start[j]:subj_end[j]] = 
+                                x_ipred[subj_start[j]:subj_end[j], 4] ./ VC[j];
+      
+        auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
+        c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]);
+        t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
+        
+      }
                        
       ipred[subj_start[j]:subj_end[j]] = 
                                 x_ipred[subj_start[j]:subj_end[j], 2] ./ VC[j];
-                                
-      auc[subj_start[j]:subj_end[j]] = 
-                                x_ipred[subj_start[j]:subj_end[j], 4] ./ VC[j];
       
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 6]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], 7]) - t_1;
-      t_half_alpha[j] = log(2)/alpha[j];
-      t_half_terminal[j] = log(2)/beta[j];
-    
     }
 
     for(i in 1:n_total){
@@ -198,3 +284,5 @@ generated quantities{
     }
   }
 }
+
+

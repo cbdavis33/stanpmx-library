@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
@@ -18,25 +17,32 @@ model <- cmdstan_model(
   "zero_into_depot_2cmt_linear/Stan/Fit/zero_into_depot_2cmt_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
-priors <- model$sample(data = stan_data,
-                       seed = 235813,
-                       chains = 4,
-                       parallel_chains = 4,
-                       threads_per_chain = 1,
-                       iter_warmup = 500,
-                       iter_sampling = 1000,
-                       adapt_delta = 0.8,
-                       refresh = 500,
-                       max_treedepth = 10,
-                       init = function() list(TVCL = rlnorm(1, log(2), 0.3),
-                                              TVVC = rlnorm(1, log(30), 0.3),
-                                              TVQ = rlnorm(1, log(4), 0.3),
-                                              TVVP = rlnorm(1, log(30), 0.3),
-                                              TVKA = rlnorm(1, log(1), 0.3),
-                                              TVDUR = rlnorm(1, log(1), 0.3),
-                                              omega = rlnorm(6, log(0.3), 0.3),
-                                              sigma_p = rlnorm(1, log(0.2), 0.3)))
-
+priors <- 
+  model$sample(data = stan_data,
+               seed = 235813,
+               chains = 4,
+               parallel_chains = 4,
+               threads_per_chain = 1,
+               iter_warmup = 500,
+               iter_sampling = 1000,
+               adapt_delta = 0.8,
+               refresh = 500,
+               max_treedepth = 10,
+               init = function() 
+                 with(stan_data,
+                      list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+                           TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+                           TVQ = rlnorm(1, log(location_tvq), scale_tvq/10),
+                           TVVP = rlnorm(1, log(location_tvvp), scale_tvvp/10),
+                           TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+                           TVDUR = rlnorm(1, log(location_tvdur), scale_tvdur),
+                           omega = abs(rnorm(6, 0, c(scale_omega_cl,
+                                                     scale_omega_vc,
+                                                     scale_omega_q,
+                                                     scale_omega_vp,
+                                                     scale_omega_ka,
+                                                     scale_omega_dur))),
+                           sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit <- read_rds(
   "zero_into_depot_2cmt_linear/Stan/Fits/zero_into_depot_2cmt_prop.rds")
@@ -44,8 +50,7 @@ fit <- read_rds(
 draws_df <- fit$draws(format = "draws_df")
 
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
-                             str_c("omega_", c("cl", "vc", "q", "vp", "ka", 
-                                               "dur")),
+                             str_c("omega_", c("cl", "vc", "q", "vp", "ka", "dur")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
                              "sigma_p")
 
@@ -59,8 +64,8 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 (target_comparison_tv <- draws_all_df %>% 
     filter(str_detect(variable, "TV")) %>%
     mutate(variable = factor(variable, 
-                             levels = str_c("TV", c("CL", "VC", "Q", 
-                                                    "VP", "KA", "DUR")))) %>% 
+                             levels = str_c("TV", c("CL", "VC", "Q", "VP",
+                                                    "KA", "DUR")))) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() +
@@ -73,9 +78,11 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 (target_comparison_omega <- draws_all_df %>% 
     filter(str_detect(variable, "omega_")) %>% 
     mutate(variable = factor(variable, 
-                             levels = str_c("omega_", c("cl", "vc", "q", 
-                                                        "vp", "ka", "dur"))),
-           variable = fct_recode(variable, "omega[CL]" = "omega_cl",
+                             levels = str_c("omega_", 
+                                            c("cl", "vc", "q", "vp", 
+                                              "ka", "dur"))),
+           variable = fct_recode(variable, 
+                                 "omega[CL]" = "omega_cl",
                                  "omega[VC]" = "omega_vc",
                                  "omega[Q]" = "omega_q",
                                  "omega[VP]" = "omega_vp",
@@ -152,4 +159,4 @@ target_comparison_tv /
   target_comparison_sigma +
   plot_layout(guides = 'collect', 
               design = layout) &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") 
