@@ -31,12 +31,11 @@ sigma <- 0.2
 n_subjects_per_dose <- 6
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
-                         cmt = 1, amt = c(50, 100, 200, 400), ss = 0,
+                         cmt = 1, amt = c(100, 200, 400, 800), ss = 0, 
                          evid = 1) %>%
   as_tibble() %>% 
   rename_all(toupper) %>%
   select(ID, TIME, everything()) 
-
 
 dense_grid <- seq(0, 24*7, by = 0.5)
 
@@ -53,6 +52,7 @@ nonmem_data_simulate <- dosing_data %>%
          II = 0,
          CMT = 2,
          EVID = 0,
+         # RATE = 0,
          TIME = times_to_simulate) %>% 
   ungroup() %>%
   bind_rows(dosing_data) %>% 
@@ -100,6 +100,7 @@ stan_data <- list(n_subjects = n_subjects,
                   omega_dur = omega_dur,
                   R = R,
                   sigma = sigma,
+                  solver = 4,
                   t_1 = 144,
                   t_2 = 168)
 
@@ -108,24 +109,42 @@ model <- cmdstan_model(
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               seed = 11,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "DUR",
-                                     "auc_t1_t2", "c_max", "t_max", 
-                                     "t_half_alpha", "t_half_terminal")) %>% 
-  spread_draws(CL[i], VC[i], Q[i], VP[i], KA[i], DUR[i],
-               auc_t1_t2[i], c_max[i], t_max[i],
-               t_half_alpha[i], t_half_terminal[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, Q, VP, KA, DUR, auc_t1_t2, c_max, t_max,
-         t_half_alpha, t_half_terminal)
+params_ind <- if(stan_data$solver == 4){
+  
+  simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "DUR",
+                         "auc_t1_t2", "c_max", "t_max", "t_half_alpha", 
+                         "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q, VP, KA, DUR,
+                   auc_t1_t2, c_max, t_max, t_half_alpha, t_half_terminal)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                filter(EVID == 1) %>% 
+                distinct(ID, AMT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, AMT, CL, VC, Q, VP, KA, DUR, auc_t1_t2, c_max, t_max, 
+           t_half_alpha, t_half_terminal)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "DUR", 
+                         "t_half_alpha", "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q, VP, KA, DUR, t_half_alpha, t_half_terminal)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                filter(EVID == 1) %>% 
+                distinct(ID, AMT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, AMT, CL, VC, Q, VP, KA, DUR, t_half_alpha, t_half_terminal)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -159,15 +178,14 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        breaks = seq(0, max(data$TIME), by = 24),
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
 
 data %>%
   select(-IPRED) %>%
-  write_csv("zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_exp.csv", 
+  write_csv("zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_exp.csv",
             na = ".")
 
 params_ind %>%
-  write_csv("zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_exp_params_ind.csv")
+  write_csv("zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_exp_params_ind.csv",
+            na = ".")
 
 

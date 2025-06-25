@@ -1,14 +1,14 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
-nonmem_data <- read_csv("zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_prop.csv",
-                        na = ".") %>% 
+nonmem_data <- read_csv(
+  "zero_into_depot_2cmt_linear/Data/zero_into_depot_2cmt_prop.csv",
+  na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
          DV = "dv") %>% 
@@ -24,32 +24,29 @@ nonmem_data %>%
             n_bloq = sum(bloq)) %>%
   filter(n_bloq > 0)
 
-(p1 <- ggplot(nonmem_data %>%
-                group_by(ID) %>%
-                mutate(Dose = factor(max(amt, na.rm = TRUE))) %>%
-                ungroup() %>%
-                filter(mdv == 0)) +
-    geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
-    geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
-    scale_color_discrete(name = "Dose (mg)") +
-    scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
-                       limits = c(NA, NA),
-                       trans = "identity") +
-    scale_x_continuous(name = "Time (d)",
-                       breaks = seq(0, 216, by = 24),
-                       labels = seq(0, 216/24, by = 24/24),
-                       limits = c(0, NA)) +
-    theme_bw(18) +
-    theme(axis.text = element_text(size = 14, face = "bold"),
-          axis.title = element_text(size = 18, face = "bold"),
-          axis.line = element_line(linewidth = 2),
-          legend.position = "bottom"))
-
-p1 +
-  facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-
-p1 +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
+# (p1 <- ggplot(nonmem_data %>%
+#                 group_by(ID) %>%
+#                 mutate(Dose = factor(max(amt, na.rm = TRUE))) %>%
+#                 ungroup() %>%
+#                 filter(mdv == 0)) +
+#     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
+#     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
+#     scale_color_discrete(name = "Dose (mg)") +
+#     scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+#                        limits = c(NA, NA),
+#                        trans = "identity") +
+#     scale_x_continuous(name = "Time (d)",
+#                        breaks = seq(0, 216, by = 24),
+#                        labels = seq(0, 216/24, by = 24/24),
+#                        limits = c(0, NA)) +
+#     theme_bw(18) +
+#     theme(axis.text = element_text(size = 14, face = "bold"),
+#           axis.title = element_text(size = 18, face = "bold"),
+#           axis.line = element_line(linewidth = 2),
+#           legend.position = "bottom"))
+# 
+# p1 +
+#   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
 
 
 n_subjects <- nonmem_data %>%  # number of individuals
@@ -114,28 +111,43 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_dur = 0.4,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
-                  prior_only = 0)
+                  prior_only = 0,
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model(
   "zero_into_depot_2cmt_linear/Stan/Fit/zero_into_depot_2cmt_prop_no_threading.stan")
 
-fit <- model$sample(data = stan_data,
-                    seed = 11235,
-                    chains = 4,
-                    parallel_chains = 4,
-                    iter_warmup = 500,
-                    iter_sampling = 1000,
-                    adapt_delta = 0.8,
-                    refresh = 500,
-                    max_treedepth = 10,
-                    init = function() list(TVCL = rlnorm(1, log(2), 0.3),
-                                           TVVC = rlnorm(1, log(30), 0.3),
-                                           TVQ = rlnorm(1, log(4), 0.3),
-                                           TVVP = rlnorm(1, log(30), 0.3),
-                                           TVKA = rlnorm(1, log(1), 0.3),
-                                           TVDUR = rlnorm(1, log(1), 0.3),
-                                           omega = rlnorm(6, log(0.3), 0.3),
-                                           sigma_p = rlnorm(1, log(0.2), 0.3)))
+fit <- model$sample(
+  data = stan_data,
+  seed = 112358,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  adapt_delta = 0.8,
+  refresh = 500,
+  max_treedepth = 10,
+  # output_dir = "zero_into_depot_2cmt_linear/Stan/Fits/Output",
+  # output_basename = "prop_no_threading",
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVQ = rlnorm(1, log(location_tvq), scale_tvq/10),
+              TVVP = rlnorm(1, log(location_tvvp), scale_tvvp/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVDUR = rlnorm(1, log(location_tvdur), scale_tvdur),
+              omega = abs(rnorm(6, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_q,
+                                        scale_omega_vp,
+                                        scale_omega_ka,
+                                        scale_omega_dur))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit$save_object(
   "zero_into_depot_2cmt_linear/Stan/Fits/zero_into_depot_2cmt_prop_no_threading.rds")
+
+fit$save_data_file(dir = "zero_into_depot_2cmt_linear/Stan/Fits/Stan_Data",
+                   basename = "prop_no_threading", 
+                   timestamp = FALSE, random = FALSE)
