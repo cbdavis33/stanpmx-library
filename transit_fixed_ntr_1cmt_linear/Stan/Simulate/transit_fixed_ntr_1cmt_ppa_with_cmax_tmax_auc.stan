@@ -3,13 +3,13 @@
 // n_transit is fixed to a positive integer that can be defined as data
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
-// General ODE solution using Torsten
+// User's choice of matrix-exponential, ODE, or ODE with AUC, Cmax, Tmax
 // proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
 // Since we have a normal distribution on the error, but the DV must be > 0, it
 //   generates values from a normal that is truncated below at 0
-// Output includes individual Cmax over the whole time period, Tmax between t1 
-//   and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like a 
-//   dosing interval)
+// If solver == 3 (ODE with AUC, Cmax, Tmax), output includes individual Cmax 
+//   over the whole time period, Tmax between t1 and t2, AUC since 0 for every 
+//   timepoint, and AUC between t1 and t2 (like a dosing interval)
 
 functions{
   
@@ -22,20 +22,42 @@ functions{
 
   }
   
-  vector transit_fixed_1cmt_ode(real t, vector y, array[] real params,
+  vector transit_fixed_1cmt_ode(real t, vector y, array[] real params, 
                                 array[] real x_r, array[] int x_i){
+    
+    real cl = params[1];
+    real vc = params[2];
+    real ka = params[3];
+    real ktr = params[4];
+    
+    int n_transit = x_i[1];
+    
+    real ke = cl/vc;
+    
+    vector[n_transit + 3] dydt;
+
+    dydt[1] = -ktr*y[1];               // 0th transit compartment (depot)
+    for(i in 2:(n_transit + 1)){
+      dydt[i] = ktr*(y[i - 1] - y[i]);
+    }
+    dydt[n_transit + 2] = ktr*y[n_transit + 1] - ka*y[n_transit + 2]; // absorption
+    dydt[n_transit + 3] = ka*y[n_transit + 2] - ke*y[n_transit + 3];  // central
+    
+    return dydt;
+  }
+  
+  vector transit_fixed_1cmt_with_auc_ode(real t, vector y, array[] real params,
+                                         array[] real x_r, array[] int x_i){
 
     real cl = params[1];
     real vc = params[2];
     real ka = params[3];
-    real mtt = params[4];
+    real ktr = params[4];
 
     real t_1 = x_r[1];
     real t_2 = x_r[2];
 
     int n_transit = x_i[1];
-
-    real ktr = (n_transit + 1)/mtt;
 
     real ke = cl/vc;
 
@@ -99,6 +121,8 @@ data{
 
   int<lower = 1> n_transit;
   
+  int<lower = 1, upper = 3> solver; // 1 = mat-exp, 2 = rk45, 3 = rk45 with AUC, Cmax, Tmax
+  
   real<lower = 0> t_1;
   real<lower = 0> t_2;
   
@@ -106,8 +130,8 @@ data{
 transformed data{
   
   int n_random = 4;           // Number of random effects
-  int n_cmt = n_transit + 7;  // Depot, tr_1, ..., tr_n, absorption, central,
-                              //   AUC, AUC_t1-t2, Cmax, Tmax
+  int n_cmt = (solver == 3) ? n_transit + 7 : n_transit + 3; // Depot, tr_1, ..., tr_n, absorption, central,
+                                                             // (AUC, AUC_t1-t2, Cmax, Tmax)
 
   vector[n_random] omega = [omega_cl, omega_vc, omega_ka, omega_mtt]';
   
@@ -136,10 +160,10 @@ generated quantities{
   vector[n_total] ipred;  // concentration with no residual error
   vector[n_total] dv;     // concentration with residual error
   
-  vector[n_total] auc;            // AUC
-  vector[n_subjects] auc_t1_t2;   // AUC from t1 up to t2
-  vector[n_subjects] c_max;       // Cmax
-  vector[n_subjects] t_max;       // Tmax
+  vector[solver == 3 ? n_total : 0] auc;            // AUC
+  vector[solver == 3 ? n_subjects : 0] auc_t1_t2;   // AUC from t1 up to t2
+  vector[solver == 3 ? n_subjects : 0] c_max;       // Cmax
+  vector[solver == 3 ? n_subjects : 0] t_max;       // Tmax
   vector[n_subjects] t_half;
   
   vector[n_subjects] CL;
@@ -147,6 +171,7 @@ generated quantities{
   vector[n_subjects] KA;
   vector[n_subjects] MTT;
   vector[n_subjects] KTR;
+  vector[n_subjects] KE;
   
   {
     
@@ -168,33 +193,79 @@ generated quantities{
     KA = col(theta, 3);
     MTT = col(theta, 4);
     KTR = (n_transit + 1) ./ MTT;
+    KE = CL ./ VC;
   
     for(j in 1:n_subjects){
+      
+      if(solver == 1){
+        
+        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      
+        for(i in 1:(n_transit + 1)){
+          K[i, i] = -KTR[j];
+          K[(i + 1), i] = KTR[j];
+        }
+        
+        K[(n_transit + 2), (n_transit + 2)] = -KA[j];
+        K[(n_transit + 3), (n_transit + 2)] = KA[j];
+        K[(n_transit + 3), (n_transit + 3)] = -KE[j];
 
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(transit_fixed_1cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate[subj_start[j]:subj_end[j]],
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       {CL[j], VC[j], KA[j], MTT[j]},
-                       bioav, tlag, x_r, x_i)';
-
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           K, bioav, tlag)';
+        
+      }else if(solver == 2){
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(transit_fixed_1cmt_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], KA[j], KTR[j]},
+                         bioav, tlag, x_r, x_i)';
+        
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(transit_fixed_1cmt_with_auc_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], KA[j], KTR[j]},
+                         bioav, tlag, x_r, x_i)';
+                         
+        auc[subj_start[j]:subj_end[j]] = 
+                    x_ipred[subj_start[j]:subj_end[j], (n_transit + 4)] ./ VC[j];
+      
+        auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 5)]) / VC[j];
+        c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 6)]);
+        t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 7)]) - t_1;
+          
+      }
+      
       ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], (n_transit + 3)] ./ VC[j];
         
-      auc[subj_start[j]:subj_end[j]] = 
-                  x_ipred[subj_start[j]:subj_end[j], (n_transit + 4)] ./ VC[j];
-      
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 5)]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 6)]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 7)]) - t_1;
-      t_half[j] = log(2)/(CL[j]/VC[j]);
+      t_half[j] = log(2)/(KE[j]);
       
     }
 
