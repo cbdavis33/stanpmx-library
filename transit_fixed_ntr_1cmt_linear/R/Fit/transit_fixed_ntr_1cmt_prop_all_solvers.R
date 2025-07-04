@@ -1,14 +1,13 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
 set_cmdstan_path("~/Torsten/cmdstan")
 
 nonmem_data <- read_csv(
-  "transit_fixed_ntr_1cmt_linear/Data/transit_fixed_ntr_1cmt_prop.csv",
+  "transit_fixed_ntr_1cmt_linear/Data/transit_fixed_ntr_1cmt_ppa.csv",
   na = ".") %>% 
   rename_all(tolower) %>% 
   rename(ID = "id",
@@ -48,9 +47,6 @@ nonmem_data %>%
 
 p1 +
   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-
-p1 +
-  facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 
 n_subjects <- nonmem_data %>%  # number of individuals
@@ -111,7 +107,8 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  n_transit = 6,
+                  no_gq_predictions = 0,
+                  n_transit = 5,
                   solver = 1)
 
 model <- cmdstan_model(
@@ -125,16 +122,21 @@ fit_mat_exp <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 300,
   adapt_delta = 0.8,
   refresh = 10,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(6, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVMTT = rlnorm(1, log(location_tvmtt), scale_tvmtt),
+              omega = abs(rnorm(4, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_ka,
+                                        scale_omega_mtt))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit_mat_exp$save_object(
   "transit_fixed_ntr_1cmt_linear/Stan/Fits/transit_fixed_ntr_1cmt_prop_mat_exp.rds")
@@ -148,16 +150,21 @@ fit_rk45 <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 300,
   adapt_delta = 0.8,
   refresh = 5,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(6, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVMTT = rlnorm(1, log(location_tvmtt), scale_tvmtt),
+              omega = abs(rnorm(4, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_ka,
+                                        scale_omega_mtt))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit_rk45$save_object(
   "transit_fixed_ntr_1cmt_linear/Stan/Fits/transit_fixed_ntr_1cmt_prop_rk45.rds")
@@ -170,16 +177,21 @@ fit_bdf <- model$sample(
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 1000,
+  iter_sampling = 300,
   adapt_delta = 0.8,
   refresh = 5,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         TVMTT = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(4, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVMTT = rlnorm(1, log(location_tvmtt), scale_tvmtt),
+              omega = abs(rnorm(4, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_ka,
+                                        scale_omega_mtt))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
 fit_bdf$save_object(
   "transit_fixed_ntr_1cmt_linear/Stan/Fits/transit_fixed_ntr_1cmt_prop_bdf.rds")

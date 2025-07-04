@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(cmdstanr)
 library(tidyverse)
 
@@ -48,10 +47,6 @@ nonmem_data %>%
 # 
 # p1 +
 #   facet_wrap(~ID, scales = "free_y", labeller = label_both, ncol = 4)
-# 
-# p1 +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -113,31 +108,38 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_sigma_a = 0.5,
                   lkj_df_sigma = 2,
                   prior_only = 0,
-                  n_transit = 6,
+                  n_transit = 5,
                   no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "transit_fixed_ntr_1cmt_linear/Stan/Fit/transit_fixed_ntr_1cmt_ppa.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit <- model$sample(data = stan_data,
-                    seed = 1928374,
-                    chains = 4,
-                    parallel_chains = 4,
-                    threads_per_chain = parallel::detectCores()/4,
-                    iter_warmup = 500,
-                    iter_sampling = 1000,
-                    adapt_delta = 0.8,
-                    refresh = 100,
-                    max_treedepth = 10,
-                    output_dir = "transit_fixed_ntr_1cmt_linear/Stan/Fits/Output",
-                    output_basename = "ppa",
-                    init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                                           TVVC = rlnorm(1, log(18), 0.3),
-                                           TVKA = rlnorm(1, log(1), 0.3),
-                                           TVMTT = rlnorm(1, log(1), 0.3),
-                                           omega = rlnorm(4, log(0.3), 0.3),
-                                           sigma = rlnorm(2, log(0.4), 0.3)))
+fit <- model$sample(
+  data = stan_data,
+  seed = 1928374,
+  chains = 4,
+  parallel_chains = 4,
+  threads_per_chain = parallel::detectCores()/4,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  adapt_delta = 0.8,
+  refresh = 100,
+  max_treedepth = 10,
+  output_dir = "transit_fixed_ntr_1cmt_linear/Stan/Fits/Output",
+  output_basename = "ppa",
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl/10),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc/10),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka/10),
+              TVMTT = rlnorm(1, log(location_tvmtt), scale_tvmtt),
+              omega = abs(rnorm(4, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_ka,
+                                        scale_omega_mtt))),
+              sigma = abs(rnorm(2, 0, c(scale_sigma_p,
+                                        scale_sigma_a))))))
 
 fit$save_object(
   "transit_fixed_ntr_1cmt_linear/Stan/Fits/transit_fixed_ntr_1cmt_ppa.rds")
