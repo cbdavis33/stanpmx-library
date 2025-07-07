@@ -3,34 +3,62 @@
 // n_transit is fixed to a positive integer that can be defined as data
 // The 0th transit compartment is where the dosing happens (cmt = 1). This could
 //   also be called the Depot
-// General ODE solution using Torsten
+// User's choice of matrix-exponential, ODE, or ODE with AUC, Cmax, Tmax
 // exponential error - DV = IPRED*exp(eps)
-// Output includes individual Cmax over the whole time period, Tmax between t1 
-//   and t2, AUC since 0 for every timepoint, and AUC between t1 and t2 (like a 
-//   dosing interval)
+// If solver == 3 (ODE with AUC, Cmax, Tmax), output includes individual Cmax 
+//   over the whole time period, Tmax between t1 and t2, AUC since 0 for every 
+//   timepoint, and AUC between t1 and t2 (like a dosing interval)
 
 functions{
-
-  vector transit_fixed_2cmt_ode(real t, vector y, array[] real params,
+  
+  vector transit_fixed_2cmt_ode(real t, vector y, array[] real params, 
                                 array[] real x_r, array[] int x_i){
+    
+    real cl = params[1];
+    real vc = params[2];
+    real q = params[3];
+    real vp = params[4];
+    real ka = params[5];
+    real ktr = params[6];
+    
+    int n_transit = x_i[1];
+    
+    real ke = cl/vc;
+    real k_cp = q/vc;
+    real k_pc = q/vp;
+    
+    vector[n_transit + 4] dydt;
+
+    dydt[1] = -ktr*y[1];               // 0th transit compartment (depot)
+    for(i in 2:(n_transit + 1)){
+      dydt[i] = ktr*(y[i - 1] - y[i]);
+    }
+    dydt[n_transit + 2] = ktr*y[n_transit + 1] - ka*y[n_transit + 2];          // absorption
+    dydt[n_transit + 3] = ka*y[n_transit + 2] - (ke + k_cp)*y[n_transit + 3] + // central
+                          k_pc*y[n_transit + 4];
+    dydt[n_transit + 4] = k_cp*y[n_transit + 3] - k_pc*y[n_transit + 4];       // peripheral
+    
+    return dydt;
+  }
+  
+  vector transit_fixed_2cmt_with_auc_ode(real t, vector y, array[] real params,
+                                         array[] real x_r, array[] int x_i){
 
     real cl = params[1];
     real vc = params[2];
     real q = params[3];
     real vp = params[4];
     real ka = params[5];
-    real mtt = params[6];
-
-    real t_1 = x_r[1];
-    real t_2 = x_r[2];
-
+    real ktr = params[6];
+    
     int n_transit = x_i[1];
-
-    real ktr = (n_transit + 1)/mtt;
-
+    
     real ke = cl/vc;
     real k_cp = q/vc;
     real k_pc = q/vp;
+
+    real t_1 = x_r[1];
+    real t_2 = x_r[2];
 
     real slope = ka*y[n_transit + 2] - (ke + k_cp)*y[n_transit + 3] +
                           k_pc*y[n_transit + 4];
@@ -52,6 +80,7 @@ functions{
     dydt[n_transit + 8] = z;                                             // t_max
 
     return dydt;
+    
   }
   
 }
@@ -88,13 +117,15 @@ data{
   
   corr_matrix[6] R;  // Correlation matrix before transforming to Omega.
                      // Can in theory change this to having inputs for
-                     // cor_cl_vc, cor_cl_q, ... and then construct the 
+                     // cor_cl_vc, cor_cl_ka, ... and then construct the 
                      // correlation matrix in transformed data, but it's easy
                      // enough to do in R
   
   real<lower = 0> sigma;
 
   int<lower = 1> n_transit;
+  
+  int<lower = 1, upper = 3> solver; // 1 = mat-exp, 2 = rk45, 3 = rk45 with AUC, Cmax, Tmax
   
   real<lower = 0> t_1;
   real<lower = 0> t_2;
@@ -103,11 +134,10 @@ data{
 transformed data{
   
   int n_random = 6;           // Number of random effects
-  int n_cmt = n_transit + 8;  // Depot, tr_1, ..., tr_n, absorption, central, peripheral
-                              //   AUC, AUC_t1-t2, Cmax, Tmax
+  int n_cmt = (solver == 3) ? n_transit + 8 : n_transit + 4; // Depot, tr_1, ..., tr_n, absorption, central, peripheral
+                                                             // (AUC, AUC_t1-t2, Cmax, Tmax)
 
-  vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka,
-                            omega_mtt]';
+  vector[n_random] omega = [omega_cl, omega_vc, omega_q, omega_vp, omega_ka, omega_mtt]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
   
@@ -127,10 +157,10 @@ generated quantities{
   vector[n_total] ipred;  // concentration with no residual error
   vector[n_total] dv;     // concentration with residual error
   
-  vector[n_total] auc;            // AUC
-  vector[n_subjects] auc_t1_t2;   // AUC from t1 up to t2
-  vector[n_subjects] c_max;       // Cmax
-  vector[n_subjects] t_max;       // Tmax
+  vector[solver == 3 ? n_total : 0] auc;            // AUC
+  vector[solver == 3 ? n_subjects : 0] auc_t1_t2;   // AUC from t1 up to t2
+  vector[solver == 3 ? n_subjects : 0] c_max;       // Cmax
+  vector[solver == 3 ? n_subjects : 0] t_max;       // Tmax
   vector[n_subjects] t_half_alpha;    // alpha half-life
   vector[n_subjects] t_half_terminal; // terminal half-life
   
@@ -144,16 +174,12 @@ generated quantities{
   
   {
     
-    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVQ, TVVP, TVKA, 
-                                                 TVMTT});
+    vector[n_random] typical_values = to_vector({TVCL, TVVC, TVQ, TVVP, TVKA, TVMTT});
     
     matrix[n_random, n_subjects] eta;   
     matrix[n_subjects, n_random] theta; 
   
     matrix[n_total, n_cmt] x_ipred;
-    
-    vector[n_subjects] alpha;
-    vector[n_subjects] beta;
     
     for(i in 1:n_subjects){
       eta[, i] = multi_normal_cholesky_rng(rep_vector(0, n_random),
@@ -168,42 +194,89 @@ generated quantities{
     KA = col(theta, 5);
     MTT = col(theta, 6);
     KTR = (n_transit + 1) ./ MTT;
-    
-    alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
-    beta = 0.5*(CL./VC + Q./VC + Q./VP - 
-                 sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
   
     for(j in 1:n_subjects){
+      
+      if(solver == 1){
+        
+        matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+      
+        for(i in 1:(n_transit + 1)){
+          K[i, i] = -KTR[j];
+          K[(i + 1), i] = KTR[j];
+        }
+        
+        K[(n_transit + 2), (n_transit + 2)] = -KA[j];
+        K[(n_transit + 3), (n_transit + 2)] = KA[j];
+        K[(n_transit + 3), (n_transit + 3)] = -((CL[j] + Q[j])/VC[j]);
+        K[(n_transit + 3), (n_transit + 4)] = Q[j]/VP[j];
+        K[(n_transit + 4), (n_transit + 3)] = Q[j]/VC[j];
+        K[(n_transit + 4), (n_transit + 4)] = -Q[j]/VP[j];
 
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(transit_fixed_2cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate[subj_start[j]:subj_end[j]],
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       {CL[j], VC[j], Q[j], VP[j], KA[j], MTT[j]},
-                       bioav, tlag, x_r, x_i)';
-
-
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           K, bioav, tlag)';
+        
+      }else if(solver == 2){
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(transit_fixed_2cmt_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], Q[j], VP[j], KA[j], KTR[j]},
+                         bioav, tlag, x_r, x_i)';
+        
+      }else{
+        
+        x_ipred[subj_start[j]:subj_end[j],] =
+          pmx_solve_rk45(transit_fixed_2cmt_with_auc_ode,
+                         n_cmt,
+                         time[subj_start[j]:subj_end[j]],
+                         amt[subj_start[j]:subj_end[j]],
+                         rate[subj_start[j]:subj_end[j]],
+                         ii[subj_start[j]:subj_end[j]],
+                         evid[subj_start[j]:subj_end[j]],
+                         cmt[subj_start[j]:subj_end[j]],
+                         addl[subj_start[j]:subj_end[j]],
+                         ss[subj_start[j]:subj_end[j]],
+                         {CL[j], VC[j], Q[j], VP[j], KA[j], KTR[j]},
+                         bioav, tlag, x_r, x_i)';
+                         
+        auc[subj_start[j]:subj_end[j]] = 
+                    x_ipred[subj_start[j]:subj_end[j], (n_transit + 5)] ./ VC[j];
+      
+        auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 6)]) / VC[j];
+        c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 7)]);
+        t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 8)]) - t_1;
+          
+      }
+      
       ipred[subj_start[j]:subj_end[j]] =
         x_ipred[subj_start[j]:subj_end[j], (n_transit + 3)] ./ VC[j];
-        
-      auc[subj_start[j]:subj_end[j]] = 
-                  x_ipred[subj_start[j]:subj_end[j], (n_transit + 5)] ./ VC[j];
-      
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 6)]) / VC[j];
-      c_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 7)]);
-      t_max[j] = max(x_ipred[subj_start[j]:subj_end[j], (n_transit + 8)]) - t_1;
-      t_half_alpha[j] = log(2)/alpha[j];
-      t_half_terminal[j] = log(2)/beta[j];
       
     }
+    
+    vector[n_subjects] alpha = 0.5*(CL./VC + Q./VC + Q./VP + 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    vector[n_subjects] beta = 0.5*(CL./VC + Q./VC + Q./VP - 
+                            sqrt((CL./VC + Q./VC + Q./VP)^2 - 4*CL./VC.*Q./VP));
+    
+    t_half_alpha = log(2)/alpha;
+    t_half_terminal = log(2)/beta;
 
     for(i in 1:n_total){
       if(ipred[i] == 0){
@@ -214,4 +287,5 @@ generated quantities{
     }
   }
 }
+
 
