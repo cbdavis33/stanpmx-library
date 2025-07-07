@@ -427,20 +427,6 @@ generated quantities{
     
     matrix[n_random, n_random] R = multiply_lower_tri_self_transpose(L);
     matrix[n_random, n_random] Omega = quad_form_diag(R, omega);
-
-    cor_cl_vc = R[1, 2];
-    cor_cl_ka = R[1, 3];
-    cor_cl_bioav = R[1, 4];
-    cor_vc_ka = R[2, 3];
-    cor_vc_bioav = R[2, 4];
-    cor_ka_bioav = R[3, 4];
-
-    omega_cl_vc = Omega[1, 2];
-    omega_cl_ka = Omega[1, 3];
-    omega_cl_bioav = Omega[1, 4];
-    omega_vc_ka = Omega[2, 3];
-    omega_vc_bioav = Omega[2, 4];
-    omega_ka_bioav = Omega[3, 4];
     
     cor_cl_vc = R[1, 2];
     cor_cl_q = R[1, 3];

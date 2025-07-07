@@ -630,28 +630,25 @@ generated quantities{
     epred_stan = dv_epred[i_obs];
     ipred = dv_ipred[i_obs];
 
-  }
-
-  for(i in 1:n_obs){
-    real ipred_tmp = ipred[i];
-    real sigma_tmp = ipred_tmp*sigma_p;
-    real epred_tmp = epred_stan[i];
-    real sigma_tmp_e = epred_tmp*sigma_p;
-    dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
-    epred[i] = normal_lb_rng(epred_tmp, sigma_tmp_e, 0.0);
-    if(bloq_obs[i] == 1){
-      // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
-      //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
-      //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-      log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
-                                normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
-    }else{
-      log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
-                   normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+    for(i in 1:n_obs){
+      real ipred_tmp = ipred[i];
+      real sigma_tmp = ipred_tmp*sigma_p;
+      real epred_tmp = epred_stan[i];
+      real sigma_tmp_e = epred_tmp*sigma_p;
+      dv_ppc[i] = normal_lb_rng(ipred_tmp, sigma_tmp, 0.0);
+      epred[i] = normal_lb_rng(epred_tmp, sigma_tmp_e, 0.0);
+      if(bloq_obs[i] == 1){
+        // log_lik[i] = log(normal_cdf(lloq_obs[i] | ipred_tmp, sigma_tmp) -
+        //                  normal_cdf(0.0 | ipred_tmp, sigma_tmp)) -
+        //              normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+        log_lik[i] = log_diff_exp(normal_lcdf(lloq_obs[i] | ipred_tmp, sigma_tmp),
+                                  normal_lcdf(0.0 | ipred_tmp, sigma_tmp)) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }else{
+        log_lik[i] = normal_lpdf(dv_obs[i] | ipred_tmp, sigma_tmp) -
+                     normal_lccdf(0.0 | ipred_tmp, sigma_tmp);
+      }
+      iwres[i] = (dv_obs[i] - ipred_tmp)/sigma_tmp;
     }
-    iwres[i] = (dv_obs[i] - ipred_tmp)/sigma_tmp;
   }
 }
-
-

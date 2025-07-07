@@ -14,8 +14,8 @@ TVVC <- 20
 TVQ <- 4
 TVVP <- 40
 TVKA <- 2
-TVNTR <- 6
 TVMTT <- 1
+n_transit <- 5
 
 omega_cl <- 0.3
 omega_vc <- 0.3
@@ -28,14 +28,14 @@ R <- diag(rep(1, times = 6))
 R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 sigma_p <- 0.2
-sigma_a <- 0
+sigma_a <- 0.5
 
 cor_p_a <- 0
 
-n_subjects_per_dose <- 4
+n_subjects_per_dose <- 6
 
 dosing_data <- expand.ev(ID = 1:n_subjects_per_dose, addl = 6, ii = 24, 
-                         cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0, 
+                         cmt = 1, amt = c(100, 200, 400, 800), ss = 0, tinf = 0,
                          evid = 1) %>%
   as_tibble() %>% 
   rename_all(toupper) %>%
@@ -52,8 +52,7 @@ dense_grid <- c(seq(0.1, 4.9, by = 0.1), seq(5, 24, by = 1),
 sampling_times <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
 realistic_times <- c(sampling_times, 72, 144, 144 + sampling_times)
 
-# times_to_simulate <- dense_grid
-times_to_simulate <- realistic_times
+times_to_simulate <- realistic_times # dense_grid
 
 nonmem_data_simulate <- dosing_data %>% 
   group_by(ID) %>% 
@@ -63,11 +62,11 @@ nonmem_data_simulate <- dosing_data %>%
          II = 0,
          CMT = 2,
          EVID = 0,
+         # RATE = 0,
          TIME = times_to_simulate) %>% 
   ungroup() %>%
   bind_rows(dosing_data) %>% 
-  arrange(ID, TIME, AMT) %>% 
-  select(-TINF)
+  arrange(ID, TIME, AMT)
 
 n_subjects <- nonmem_data_simulate %>%  # number of individuals to simulate
   distinct(ID) %>% 
@@ -114,35 +113,55 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma_p = sigma_p,
                   sigma_a = sigma_a,
                   cor_p_a = cor_p_a,
-                  n_transit = 6,
+                  n_transit = n_transit,
+                  solver = 3,
                   t_1 = 0,
                   t_2 = 24)
 
-model_simulate <- cmdstan_model(
+model <- cmdstan_model(
   "transit_fixed_ntr_2cmt_linear/Stan/Simulate/transit_fixed_ntr_2cmt_ppa_with_cmax_tmax_auc.stan") 
 
-simulated_data <- model_simulate$sample(data = stan_data,
-                                        fixed_param = TRUE,
-                                        seed = 112358,
-                                        iter_warmup = 0,
-                                        iter_sampling = 1,
-                                        chains = 1,
-                                        parallel_chains = 1)
+simulated_data <- model$sample(data = stan_data,
+                               fixed_param = TRUE,
+                               seed = if_else(sigma_a == 0, 11235, 8675309),
+                               iter_warmup = 0,
+                               iter_sampling = 1,
+                               chains = 1,
+                               parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "MTT", 
-                                     "auc_t1_t2", "c_max", "t_max",
-                                     "t_half_alpha", "t_half_terminal")) %>% 
-  spread_draws(CL[ID], VC[ID], Q[ID], VP[ID], KA[ID], MTT[ID],
-               auc_t1_t2[ID], c_max[ID], t_max[ID], 
-               t_half_alpha[ID], t_half_terminal[ID]) %>% 
-  inner_join(dosing_data %>%
-               group_by(ID) %>% 
-               slice_head(n = 1) %>%
-               ungroup(),
-             by = "ID") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, Q, VP, KA, MTT, auc_t1_t2, c_max, t_max, 
-         t_half_alpha, t_half_terminal)
+params_ind <- if(stan_data$solver == 3){
+  
+  simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "MTT", "KTR",
+                         "auc_t1_t2", "c_max", "t_max", 
+                         "t_half_alpha", "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q, VP, KA, MTT, KTR,
+                   auc_t1_t2, c_max, t_max, 
+                   t_half_alpha, t_half_terminal)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                filter(EVID == 1) %>% 
+                distinct(ID, AMT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, AMT, CL, VC, Q, VP, KA, MTT, KTR, 
+           auc_t1_t2, c_max, t_max, t_half_alpha, t_half_terminal)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "Q", "VP", "KA", "MTT", "KTR", 
+                         "t_half_alpha", "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q, VP, KA, MTT, KTR, 
+                   t_half_alpha, t_half_terminal)[ID]) %>%
+    ungroup() %>% 
+    left_join(dosing_data %>% 
+                filter(EVID == 1) %>% 
+                distinct(ID, AMT),
+              by = "ID") %>% 
+    ungroup() %>%
+    select(ID, AMT, CL, VC, Q, VP, KA, MTT, KTR, 
+           t_half_alpha, t_half_terminal)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -177,32 +196,17 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
                        labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
 
-(p_2 <- ggplot(data %>% 
-                 group_by(ID) %>% 
-                 mutate(Dose = factor(max(AMT))) %>% 
-                 ungroup() %>% 
-                 filter(!is.na(DV))) +
-    geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
-    geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
-    theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                       trans = "identity") + 
-    scale_x_continuous(name = "Time (h)",
-                       breaks = seq(0, max(data$TIME), by = 24),
-                       labels = seq(0, max(data$TIME), by = 24),
-                       limits = c(0, 12)))
-
-# p_1 +
-#   facet_trelliscope(~ID, nrow = 2, ncol = 2)
+prop_or_ppa <- if_else(sigma_a == 0, "prop", "ppa")
 
 data %>%
-  select(-IPRED) %>% 
-  # write_csv("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_ppa.csv",
-  #           na = ".")
-write_csv("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_prop.csv",
-          na = ".")
+  select(-IPRED) %>%
+  write_csv(str_c("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_",
+                  prop_or_ppa, ".csv"),
+            na = ".")
 
 params_ind %>%
-  # write_csv("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_ppa_params_ind.csv")
-  write_csv("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_prop_params_ind.csv")
+  write_csv(str_c("transit_fixed_ntr_2cmt_linear/Data/transit_fixed_ntr_2cmt_",
+                  prop_or_ppa, "_params_ind.csv"),
+            na = ".")
+
 
