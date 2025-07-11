@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
@@ -31,7 +30,7 @@ nonmem_data %>%
                   ungroup() %>% 
                   filter(!is.na(DV), cmt == 2, bloq == 0) %>% 
                   mutate(cmt = factor(case_when(cmt == 2 ~ "PK",
-                                                cmt == 4 ~ "PD",
+                                                cmt == 3 ~ "PD",
                                                 TRUE ~ "Dosing"),
                                       levels = c("PK", "PD", "Dosing")))) +
     geom_point(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
@@ -69,11 +68,6 @@ p_pk +
   p_pd +
   plot_layout(guides = 'collect') &
   theme(legend.position = "bottom")
-
-# p_pk +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-# p_pd +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
 
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
@@ -118,17 +112,17 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 1,
-                  location_tvvc = 8,
-                  location_tvka = 0.8,
+                  location_tvcl = 0.6,
+                  location_tvvc = 13,
+                  location_tvka = 0.9,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_tvka = 1,
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
                   scale_omega_ka = 0.4,
-                  lkj_df_omega = 2,
-                  scale_sigma = 0.5,
+                  lkj_df_omega_pk = 2,
+                  scale_sigma_pk = 0.5,
                   location_tvkin = 5,
                   location_tvkout = 0.2,
                   location_tvic50 = 10,
@@ -149,30 +143,36 @@ model <- cmdstan_model(
 
 fit <- model$sample(
   data = stan_data,
-  seed = 112358,
+  seed = 11235,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.8,
-  refresh = 500,
+  refresh = 100,
   max_treedepth = 10,
   output_dir = "depot_1cmt_linear_ir2/Stan/Fits/Output",
   output_basename = "exp_exp",
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(3, log(0.3), 0.3),
-                         sigma = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_pd = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega_pk = abs(rnorm(3, 0, c(scale_omega_cl,
+                                           scale_omega_vc,
+                                           scale_omega_ka))),
+              sigma_pk = abs(rnorm(1, 0, scale_sigma_pk)),
+              TVKIN = rlnorm(1, log(location_tvkin), scale_tvkin),
+              TVKOUT = rlnorm(1, log(location_tvkout), scale_tvkout),
+              TVIC50 = rlnorm(1, log(location_tvic50), scale_tvic50),
+              omega_pd = abs(rnorm(3, 0, c(scale_omega_kin,
+                                           scale_omega_kout,
+                                           scale_omega_ic50))),
+              sigma_pd = abs(rnorm(1, 0, scale_sigma_pd)))))
+
 
 fit$save_object("depot_1cmt_linear_ir2/Stan/Fits/depot_1cmt_exp_ir2_exp.rds")
+
 fit$save_data_file(dir = "depot_1cmt_linear_ir2/Stan/Fits/Stan_Data",
                    basename = "exp_exp", timestamp = FALSE, random = FALSE)
-
-
