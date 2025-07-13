@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
@@ -70,11 +69,6 @@ p_pk +
   plot_layout(guides = 'collect') &
   theme(legend.position = "bottom")
 
-# p_pk +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-# p_pd +
-#   facet_trelliscope(~ID, scales = "free_y", ncol = 2, nrow = 2)
-
 n_subjects <- nonmem_data %>%  # number of individuals
   distinct(ID) %>%
   count() %>%
@@ -118,17 +112,17 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_end = subj_end,
                   lloq = nonmem_data$lloq,
                   bloq = nonmem_data$bloq,
-                  location_tvcl = 1,
-                  location_tvvc = 8,
-                  location_tvka = 0.8,
+                  location_tvcl = 0.6,
+                  location_tvvc = 13,
+                  location_tvka = 0.9,
                   scale_tvcl = 1,
                   scale_tvvc = 1,
                   scale_tvka = 1,
                   scale_omega_cl = 0.4,
                   scale_omega_vc = 0.4,
                   scale_omega_ka = 0.4,
-                  lkj_df_omega = 2,
-                  scale_sigma_p = 0.5,
+                  lkj_df_omega_pk = 2,
+                  scale_sigma_p_pk = 0.5,
                   location_tvkin = 5,
                   location_tvkout = 0.2,
                   location_tvic50 = 10,
@@ -141,7 +135,7 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega_pd = 2,
                   scale_sigma_p_pd = 0.5,
                   prior_only = 0,
-                  no_gq_predictions = 0)
+                  no_gq_predictions = 0) 
 
 model <- cmdstan_model(
   "depot_1cmt_linear_ir2/Stan/Fit/depot_1cmt_prop_ir2_prop.stan",
@@ -149,7 +143,7 @@ model <- cmdstan_model(
 
 fit <- model$sample(
   data = stan_data,
-  seed = 112358,
+  seed = 11235,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
@@ -160,18 +154,25 @@ fit <- model$sample(
   max_treedepth = 10,
   output_dir = "depot_1cmt_linear_ir2/Stan/Fits/Output",
   output_basename = "prop_prop",
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(3, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVIC50 = rlnorm(1, log(15), 0.3),
-                         omega_pd = rlnorm(3, log(0.35), 0.3),
-                         sigma_p_pd = rlnorm(1, log(0.2), 0.3)))
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega_pk = abs(rnorm(3, 0, c(scale_omega_cl,
+                                           scale_omega_vc,
+                                           scale_omega_ka))),
+              sigma_p_pk = abs(rnorm(1, 0, scale_sigma_p_pk)),
+              TVKIN = rlnorm(1, log(location_tvkin), scale_tvkin),
+              TVKOUT = rlnorm(1, log(location_tvkout), scale_tvkout),
+              TVIC50 = rlnorm(1, log(location_tvic50), scale_tvic50),
+              omega_pd = abs(rnorm(3, 0, c(scale_omega_kin,
+                                           scale_omega_kout,
+                                           scale_omega_ic50))),
+              sigma_p_pd = abs(rnorm(1, 0, scale_sigma_p_pd)))))
+
 
 fit$save_object("depot_1cmt_linear_ir2/Stan/Fits/depot_1cmt_prop_ir2_prop.rds")
+
 fit$save_data_file(dir = "depot_1cmt_linear_ir2/Stan/Fits/Stan_Data",
                    basename = "prop_prop", timestamp = FALSE, random = FALSE)
-
