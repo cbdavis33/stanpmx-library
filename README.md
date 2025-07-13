@@ -34,6 +34,8 @@ Note: The workflow is a little out-of-date for most of these repositories. As of
 
 -   transit_fixed_ntr_2cmt_linear - same note as above
 
+-   depot_1cmt_linear_ir2
+
 The others have correct Stan code, so if you just want to fit, they're still good, but I haven't updated the post-processing and analyses you might want to do after fitting, yet. I'll be going through them and updating them as time allows.
 
 This is a collection of pharmacometric models written in Stan + Torsten and R. In this repo are templates for many common and less-common models in Stan + Torsten - basic one- and two-compartment IV and/or oral models, Michaelis-Menten elimination, indirect response models, effect-compartment models, the Friberg-Karlsson neutropenia model, the Savic transit compartment absorption model, delayed absorption models with a fixed number of transit compartments, models with covariates (some time-varying), BLOQ-handling, exposure-response analyses (eventually), etc. …. [stanpmx.github.io](https://bayespmx.github.io) (incomplete and in the early stages, but updated periodically) and [bayespmx.github.io](https://stanpmx.github.io) (no longer maintained) provide some tutorials and guidance. I believe that making these models public along with some tutorials will give users in the PMx community enough of a knowledge platform and a code template that they can implement a fully Bayesian workflow that involves fake data simulation, model fitting, post-processing of the posterior distribution, model diagnostics, model selection, and making predictions and future simulations, for any model that they desire.
