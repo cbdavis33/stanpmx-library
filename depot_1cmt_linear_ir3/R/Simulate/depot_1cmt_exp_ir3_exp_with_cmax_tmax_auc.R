@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
 library(patchwork)
@@ -28,15 +27,16 @@ omega_kout <- 0.4
 omega_sc50 <- 0.4
 omega_smax <- 0.4
 
-R <- diag(rep(1, times = 3))
-R[1, 2] <- R[2, 1] <- 0.4 # Put in some correlation between CL and VC
+R_pk <- diag(rep(1, times = 3))
+R_pk[1, 2] <- R_pk[2, 1] <- 0.4 # Put in some correlation between CL and VC
 
 R_pd <- diag(rep(1, times = 4))
 R_pd[1, 2] <- R_pd[2, 1] <- 0.7 # Put in some correlation between KIN and KOUT
 
-sigma <- 0.2
+sigma_pk <- 0.2
 
 sigma_pd <- 0.15
+
 
 n_subjects_per_dose <- 6
 
@@ -53,8 +53,8 @@ dense_grid <- seq(0, 24*7, by = 2)
 sampling_times_pk <- c(0.25, 0.5, 1, 2, 4, 8, 12, 24)
 realistic_times_pk <- c(sampling_times_pk, 72, 144, 144 + sampling_times_pk)
 
-sampling_times_pd <- c(0, 0.25, 1, 2, 4, 12, 24)
-realistic_times_pd <- c(sampling_times_pd, 72, 144, 144 + sampling_times_pd)
+sampling_times_pd <- c(0, 0.25, 1, 2, 6, 12, 24)
+realistic_times_pd <- c(sampling_times_pd, 72, 144 + sampling_times_pd)
 
 # times_to_simulate_pk <- dense_grid
 # times_to_simulate_pd <- dense_grid
@@ -136,39 +136,56 @@ stan_data <- list(n_subjects = n_subjects,
                   omega_kout = omega_kout,
                   omega_sc50 = omega_sc50,
                   omega_smax = omega_smax,
-                  R = R,
+                  R_pk = R_pk,
                   R_pd = R_pd,
-                  sigma = sigma,
+                  sigma_pk = sigma_pk,
                   sigma_pd = sigma_pd,
-                  solver = 2, 
                   t_1 = 144,
-                  t_2 = 168) 
+                  t_2 = 168,
+                  coupled = 0,
+                  want_auc_cmax = 1,
+                  solver = 1) # 1 = rk45, 2 = bdf, 3 = adams
 
 model <- cmdstan_model(
   "depot_1cmt_linear_ir3/Stan/Simulate/depot_1cmt_exp_ir3_exp_with_cmax_tmax_auc.stan")
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               # seed = 112358,
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "KA",
-                                     "KIN", "KOUT", "SC50", "SMAX",
-                                     "auc_t1_t2", "c_max", "t_max", 
-                                     "t_half", "r_max", "t_max_pd")) %>% 
-  spread_draws(c(CL, VC, KA, KIN, KOUT, SC50, SMAX,
-                 auc_t1_t2, c_max, t_max,
-                 t_half, r_max, t_max_pd)[i]) %>% 
-  inner_join(dosing_data %>% 
-               mutate(i = 1:n()),
-             by = "i") %>% 
-  ungroup() %>%
-  select(ID, CL, VC, KA, KIN, KOUT, SC50, SMAX,
-         auc_t1_t2, c_max, t_max,
-         t_half, r_max, t_max_pd)
+params_ind <- if(stan_data$want_auc_cmax){
+  
+  simulated_data$draws(c("CL", "VC", "KA",
+                         "KIN", "KOUT", "SC50", "SMAX",
+                         "auc_t1_t2", "c_max", "t_max", 
+                         "t_half", "r_max", "t_max_pd")) %>% 
+    spread_draws(c(CL, VC, KA, KIN, KOUT, SC50, SMAX,
+                   auc_t1_t2, c_max, t_max,
+                   t_half, r_max, t_max_pd)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, KA, KIN, KOUT, SC50, SMAX,
+           auc_t1_t2, c_max, t_max,
+           t_half, r_max, t_max_pd)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "KA",
+                         "KIN", "KOUT", "SC50", "SMAX", "t_half")) %>% 
+    spread_draws(c(CL, VC, KA, KIN, KOUT, SC50, SMAX, t_half)[i]) %>% 
+    inner_join(dosing_data %>% 
+                 mutate(i = 1:n()),
+               by = "i") %>% 
+    ungroup() %>%
+    select(ID, CL, VC, KA, KIN, KOUT, SC50, SMAX, t_half)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(c(dv, ipred)[i]) %>% 
@@ -236,10 +253,10 @@ p_pk +
   theme(legend.position = "bottom")
 
 data %>%
-  select(-IPRED) %>% 
-  write_csv("depot_1cmt_linear_ir3/Data/depot_1cmt_exp_ir3_exp.csv", na = ".")
+  select(-IPRED) %>%
+  write_csv(str_c("depot_1cmt_linear_ir3/Data/depot_1cmt_exp_ir3_exp.csv"),
+            na = ".")
 
 params_ind %>%
-  write_csv("depot_1cmt_linear_ir3/Data/depot_1cmt_exp_ir3_exp_params_ind.csv")
-
-
+  write_csv(str_c("depot_1cmt_linear_ir3/Data/depot_1cmt_exp_ir3_exp_params_ind.csv"),
+            na = ".")

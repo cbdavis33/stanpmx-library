@@ -20,7 +20,7 @@ model <- cmdstan_model(
 
 priors <- model$sample(
   data = stan_data,
-  seed = 235813,
+  seed = 98765,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = 24,
@@ -29,28 +29,36 @@ priors <- model$sample(
   adapt_delta = 0.8,
   refresh = 500,
   max_treedepth = 10,
-  init = function() list(TVCL = rlnorm(1, log(0.6), 0.3),
-                         TVVC = rlnorm(1, log(18), 0.3),
-                         TVKA = rlnorm(1, log(1), 0.3),
-                         omega = rlnorm(3, log(0.3), 0.3),
-                         sigma_p = rlnorm(1, log(0.2), 0.3),
-                         TVKIN = rlnorm(1, log(4), 0.3),
-                         TVKOUT = rlnorm(1, log(0.3), 0.3),
-                         TVSC50 = rlnorm(1, log(15), 0.3),
-                         TVSMAX = rlnorm(1, log(5), 0.3),
-                         omega_pd = rlnorm(4, log(0.35), 0.3),
-                         sigma_pd = c(rlnorm(1, log(0.2), 0.3), 
-                                      rlnorm(1, log(0.8), 0.3))))
-
+  init = function() 
+    with(stan_data,
+         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
+              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
+              TVKA = rlnorm(1, log(location_tvka), scale_tvka),
+              omega_pk = abs(rnorm(3, 0, c(scale_omega_cl,
+                                           scale_omega_vc,
+                                           scale_omega_ka))),
+              sigma_pk = abs(rnorm(2, 0, c(scale_sigma_p_pk, 
+                                           scale_sigma_a_pk))),
+              TVKIN = rlnorm(1, log(location_tvkin), scale_tvkin),
+              TVKOUT = rlnorm(1, log(location_tvkout), scale_tvkout),
+              TVSC50 = rlnorm(1, log(location_tvsc50), scale_tvsc50),
+              TVSMAX = rlnorm(1, log(location_tvsmax), scale_tvsmax),
+              omega_pd = abs(rnorm(4, 0, c(scale_omega_kin,
+                                           scale_omega_kout,
+                                           scale_omega_sc50,
+                                           scale_omega_smax))),
+              sigma_pd = abs(rnorm(2, 0, c(scale_sigma_p_pd, 
+                                           scale_sigma_a_pd))))))
 
 fit <- read_rds("depot_1cmt_linear_ir3/Stan/Fits/depot_1cmt_ppa_ir3_ppa.rds")
+
 draws_df <- fit$draws(format = "draws_df")
 
 parameters_to_summarize <- c(str_subset(fit$metadata()$stan_variables, "TV"),
                              str_c("omega_", c("cl", "vc", "ka",
                                                "kin", "kout", "sc50", "smax")),
                              str_subset(fit$metadata()$stan_variables, "cor_"),
-                             str_c("sigma_", c("p", "a", "p_pd", "a_pd")))
+                             str_c("sigma_", c("p_pk", "a_pk", "p_pd", "a_pd")))
 
 draws_all_df <- priors$draws(format = "draws_df") %>% 
   mutate(target = "prior") %>% 
@@ -89,8 +97,7 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     facet_wrap(~ variable, scales = "free", nrow = 1))
 
 (target_comparison_omega_pk <- draws_all_df %>% 
-    filter(variable %in% str_c("omega_", c("cl", "vc", "q", 
-                                           "vp", "ka"))) %>% 
+    filter(variable %in% str_c("omega_", c("cl", "vc", "ka"))) %>% 
     mutate(variable = factor(variable, 
                              levels = str_c("omega_", c("cl", "vc", "q", 
                                                         "vp", "ka"))),
@@ -152,23 +159,25 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
     scale_fill_manual(name = "Distribution",
                       values = c("prior" = "blue", "posterior" = "red")) +
     theme(legend.position = "bottom") +
-    facet_wrap(~ variable, scales = "free", nrow = 2, labeller = label_parsed))
+    facet_wrap(~ variable, scales = "free", nrow = 1, labeller = label_parsed))
 
 (target_comparison_cor_pd <- draws_all_df %>% 
-    filter(variable %in% c("cor_kin_kout", "cor_kin_sc50", "cor_kin_smax",
-                           "cor_kout_sc50", "cor_kout_smax", "cor_sc50_smax")) %>% 
+    filter(variable %in% c("cor_kin_kout", "cor_kin_sc50", "cor_kin_smax", 
+                           "cor_kout_sc50", "cor_kout_smax",
+                           "cor_sc50_smax")) %>% 
     mutate(variable = 
              factor(variable, 
-                    levels = c("cor_kin_kout", "cor_kin_sc50", "cor_kin_smax",
-                               "cor_kout_sc50", "cor_kout_smax", "cor_sc50_smax")),
+                    levels = c("cor_kin_kout", "cor_kin_sc50", "cor_kin_smax", 
+                               "cor_kout_sc50", "cor_kout_smax",
+                               "cor_sc50_smax")),
            variable = fct_recode(variable, 
                                  "rho[paste(K[`in`], ', ', K[out])]" = 
                                    "cor_kin_kout",
-                                 "rho[paste(K[`in`], ', ', SC[50])]" = 
+                                 "rho[paste(K[`in`], ', ', IC[50])]" = 
                                    "cor_kin_sc50",
                                  "rho[paste(K[`in`], ', ', S[max])]" = 
                                    "cor_kin_smax",
-                                 "rho[paste(K[out], ', ', SC[50])]" = 
+                                 "rho[paste(K[out], ', ', IC[50])]" = 
                                    "cor_kout_sc50",
                                  "rho[paste(K[out], ', ', S[max])]" = 
                                    "cor_kout_smax",
@@ -184,12 +193,13 @@ draws_all_df <- priors$draws(format = "draws_df") %>%
 
 
 (target_comparison_error_pk <- draws_all_df %>% 
-    filter(variable %in% c("sigma_p", "sigma_a", "cor_p_a")) %>% 
+    filter(variable %in% c("sigma_p_pk", "sigma_a_pk", "cor_p_a_pk")) %>% 
     mutate(variable = factor(variable, 
-                             levels = c("sigma_p", "sigma_a", "cor_p_a")),
-           variable = fct_recode(variable, "sigma[prop]" = "sigma_p",
-                                 "sigma[add]" = "sigma_a",
-                                 "rho[paste(p, ', ', a)]" = "cor_p_a")) %>% 
+                             levels = c("sigma_p_pk", "sigma_a_pk", 
+                                        "cor_p_a_pk")),
+           variable = fct_recode(variable, "sigma[prop[pk]]" = "sigma_p_pk",
+                                 "sigma[add[PK]]" = "sigma_a_pk",
+                                 "rho[paste(p, ', ', a[PK])]" = "cor_p_a_pk")) %>% 
     ggplot() +
     geom_density(aes(x = value, fill = target), alpha = 0.25) +
     theme_bw() + 
@@ -217,7 +227,7 @@ layout_pk <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 4.5, r = 6),
-  area(t = 5, l = 1, b = 5.5, r = 6)
+  area(t = 5, l = 3, b = 5.5, r = 4)
 )
 
 target_comparison_tv_pk /
@@ -232,7 +242,7 @@ layout_pd <- c(
   area(t = 1, l = 1, b = 1.5, r = 6),
   area(t = 2, l = 1, b = 2.5, r = 6),
   area(t = 3, l = 1, b = 4.5, r = 6),
-  area(t = 5, l = 1, b = 5.5, r = 6)
+  area(t = 5, l = 3, b = 5.5, r = 4)
 )
 
 target_comparison_tv_pd /
