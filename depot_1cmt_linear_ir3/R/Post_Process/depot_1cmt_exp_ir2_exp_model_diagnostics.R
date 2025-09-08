@@ -1466,7 +1466,7 @@ ggplot() +
   facet_wrap(~.variable, ncol = 1, scales = "free") +
   theme(legend.position = "bottom") +
   scale_fill_manual(name = "Population Parameter",
-                    values = c("red", "blue", "green")) +
+                    values = c("red", "blue", "green", "magenta")) +
   guides(color = "none") +
   ggtitle("Individual Parameter Posterior Densities") 
 
