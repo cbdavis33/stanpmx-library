@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
@@ -35,7 +34,7 @@ t1 <- dosing_data %>%
   distinct() %>% 
   deframe()
 
-times_new_pk <- tibble(time = sort(unique(c(t1, 0.25, seq(0, 168, by = 0.5)))))
+times_new_pk <- tibble(time = sort(unique(c(t1, 0.25, 0.5, seq(0, 168, by = 1)))))
 times_new_pd <- times_new_pk
 
 new_data_pk <- bind_rows(replicate(max(dosing_data$ID), times_new_pk, 
@@ -65,14 +64,13 @@ new_data_pd <- bind_rows(replicate(max(dosing_data$ID), times_new_pd,
          ss = 0) %>%
   select(ID, time, everything())
 
-
 new_data <- new_data_pk %>% 
   bind_rows(new_data_pd, dosing_data) %>% 
   arrange(ID, time, cmt)
 
 
 # number of individuals in the original dataset
-n_subjects <- fit$metadata()$stan_variable_sizes$Z[2]
+n_subjects <- fit$metadata()$stan_variable_sizes$Z_pk[2]
 
 n_subjects_new <- new_data %>%  # number of new individuals
   distinct(ID) %>% 
@@ -105,25 +103,25 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_ir3/Stan/Predict/depot_1cmt_ppa_ir3_ppa_predict_new_subjects.stan")
 
-preds <- model$generate_quantities(fit %>%
-                                     as_draws_array() %>%
-                                     thin_draws(10),
+preds <- model$generate_quantities(fit$draws() %>%
+                                     thin_draws(1),
                                    data = stan_data,
                                    parallel_chains = 4,
-                                   seed = 1234)  
+                                   seed = 1234)
 
 preds_df <- preds$draws(format = "draws_df")
 
 regimens <- str_c(c(100, 200, 400, 800, 1200, 1600), " mg")
 
 post_preds_summary <- preds_df %>%
-  spread_draws(c(pred, ipred, dv)[i]) %>%
-  median_qi(ipred, pred, dv) %>%
+  spread_draws(epred_stan[i], epred[i]) %>%
+  median_qi(epred_stan, epred) %>%
   mutate(ID = new_data$ID[i],
          time = new_data$time[i],
          cmt = new_data$cmt[i]) %>%
@@ -132,15 +130,13 @@ post_preds_summary <- preds_df %>%
                           levels = regimens),
          cmt = case_when(cmt == 2 ~ "PK",
                          cmt == 3 ~ "PD",
-                         TRUE ~ NA_character_) %>%
+                         .default = NA_character_) %>%
            factor(levels = c("PK", "PD"))) %>% 
   filter(!is.na(cmt))
 
 
 tmp <- ggplot(post_preds_summary %>% filter(cmt == "PK"), 
               aes(x = time, group = ID)) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = dv), linetype = 2, size = 1.05) +
   ggforce::facet_wrap_paginate(~ ID + cmt, 
                                labeller = label_both,
                                nrow = 1, ncol = 6,
@@ -151,12 +147,12 @@ p_pk <- p_pd <- vector(mode = "list", length = ggforce::n_pages(tmp))
 for(i in 1:ggforce::n_pages(tmp)){
   p_pk[[i]] <- ggplot(post_preds_summary %>% filter(cmt == "PK"), 
                       aes(x = time, group = ID)) +
-    geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
+    geom_ribbon(aes(ymin = epred.lower, ymax = epred.upper),
                 fill = "blue", alpha = 0.25, show.legend = FALSE) +
-    geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
+    geom_ribbon(aes(ymin = epred_stan.lower, ymax = epred_stan.upper),
                 fill = "blue", alpha = 0.5, show.legend = FALSE) +
-    geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-    geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+    geom_line(aes(y = epred_stan), linetype = 1, linewidth = 1.15) +
+    geom_line(aes(y = epred), linetype = 2, linewidth = 1.05) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10",
                        limits = c(NA, NA)) +
@@ -164,7 +160,6 @@ for(i in 1:ggforce::n_pages(tmp)){
                        breaks = seq(0, 168, by = 24),
                        labels = seq(0, 168, by = 24),
                        limits = c(0, 168)) +
-    # scale_x_continuous(name = "Time (d)") +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
@@ -178,12 +173,12 @@ for(i in 1:ggforce::n_pages(tmp)){
 for(i in 1:ggforce::n_pages(tmp)){
   p_pd[[i]] <- ggplot(post_preds_summary %>% filter(cmt == "PD"), 
                       aes(x = time, group = ID)) +
-    geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
+    geom_ribbon(aes(ymin = epred.lower, ymax = epred.upper),
                 fill = "blue", alpha = 0.25, show.legend = FALSE) +
-    geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
+    geom_ribbon(aes(ymin = epred_stan.lower, ymax = epred_stan.upper),
                 fill = "blue", alpha = 0.5, show.legend = FALSE) +
-    geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-    geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+    geom_line(aes(y = epred_stan), linetype = 1, linewidth = 1.15) +
+    geom_line(aes(y = epred), linetype = 2, linewidth = 1.05) +
     scale_y_continuous(name = latex2exp::TeX("Response (units)"),
                        trans = "log10",
                        limits = c(NA, NA)) +
@@ -191,7 +186,6 @@ for(i in 1:ggforce::n_pages(tmp)){
                        breaks = seq(0, 168, by = 24),
                        labels = seq(0, 168, by = 24),
                        limits = c(0, 168)) +
-    # scale_x_continuous(name = "Time (d)") +
     theme_bw() +
     theme(axis.text = element_text(size = 14, face = "bold"),
           axis.title = element_text(size = 18, face = "bold"),
@@ -227,12 +221,12 @@ p_pk_check <- post_preds_summary %>%
   filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"),
          cmt == "PK") %>%
   ggplot(aes(x = time, group = ID)) +
-  geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
-              fill = "blue", alpha = 0.25, show.legend = FALSE) +
-  geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
-              fill = "blue", alpha = 0.5, show.legend = FALSE) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+  geom_lineribbon(aes(y = epred, ymin = epred.lower, ymax = epred.upper),
+                  fill = "blue", color = "blue", linewidth = 1.05,
+                  alpha = 0.25, show.legend = FALSE) +
+  geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, ymax = epred_stan.upper),
+                  fill = "blue", color = "blue", linewidth = 1.15,
+                  alpha = 0.5, show.legend = FALSE) +
   geom_point(data = data %>% 
                mutate(regimen = factor(regimen, levels = regimens)) %>% 
                filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"), 
@@ -259,12 +253,12 @@ p_pd_check <- post_preds_summary %>%
   filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"),
          cmt == "PD") %>%
   ggplot(aes(x = time, group = ID)) +
-  geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
-              fill = "blue", alpha = 0.25, show.legend = FALSE) +
-  geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
-              fill = "blue", alpha = 0.5, show.legend = FALSE) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = dv), linetype = 2, size = 1.05) +
+  geom_lineribbon(aes(y = epred, ymin = epred.lower, ymax = epred.upper),
+                  fill = "blue", color = "blue", linewidth = 1.05,
+                  alpha = 0.25, show.legend = FALSE) +
+  geom_lineribbon(aes(y = epred_stan, ymin = epred_stan.lower, ymax = epred_stan.upper),
+                  fill = "blue", color = "blue", linewidth = 1.15,
+                  alpha = 0.5, show.legend = FALSE) +
   geom_point(data = data %>% 
                mutate(regimen = factor(regimen, levels = regimens)) %>% 
                filter(regimen %in% str_c(c(100, 200, 400, 800), " mg"), 
@@ -289,15 +283,32 @@ p_pd_check <- post_preds_summary %>%
 ggpubr::ggarrange(p_pk_check, p_pd_check, ncol = 2)
 
 ## Summary of distribution of parameters for new subjects 
-est_ind <- preds_df %>%
-  spread_draws(c(CL, VC, KA, 
-                 auc_ss, c_max, t_max, t_half,
-                 KIN, KOUT, SC50, SMAX, t_max_pd, r_max)[ID]) %>% 
-  median_qi() %>% 
-  inner_join(post_preds_summary %>% 
-               filter(time == 168, cmt == "PK") %>% 
-               select(ID, c_trough = "ipred") %>% 
-               distinct(),
-             by = "ID")
+est_ind <- if(stan_data$want_auc_cmax){
+  preds_df %>%
+    spread_draws(c(CL, VC, KA, 
+                   auc_ss, c_max, t_max, t_half,
+                   KIN, KOUT, SC50, SMAX, t_max_pd, r_max)[ID]) %>% 
+    median_qi() %>% 
+    select(ID, CL, VC, KA, 
+           auc_ss, c_max, t_max, t_half,
+           KIN, KOUT, SC50, SMAX, t_max_pd, r_max) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168, cmt == "PK") %>% 
+                 select(ID, c_trough = "epred_stan") %>% 
+                 distinct(),
+               by = "ID")
+}else{
+  preds_df %>%
+    spread_draws(c(CL, VC, KA, t_half,
+                   KIN, KOUT, SC50, SMAX)[ID]) %>% 
+    median_qi() %>% 
+    select(ID, CL, VC, KA, t_half,
+           KIN, KOUT, SC50, SMAX) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168, cmt == "PK") %>% 
+                 select(ID, c_trough = "epred_stan") %>% 
+                 distinct(),
+               by = "ID")
+}
 
 est_ind

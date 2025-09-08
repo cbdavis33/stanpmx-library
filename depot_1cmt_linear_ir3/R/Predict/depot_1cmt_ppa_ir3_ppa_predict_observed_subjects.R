@@ -1,7 +1,6 @@
 rm(list = ls())
 cat("\014")
 
-# library(trelliscopejs)
 library(cmdstanr)
 library(tidybayes)
 library(posterior)
@@ -110,13 +109,13 @@ stan_data <- list(n_subjects = n_subjects,
                   subj_start = subj_start,
                   subj_end = subj_end,
                   t_1 = 144,
-                  t_2 = 168)
+                  t_2 = 168,
+                  want_auc_cmax = 1)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_ir3/Stan/Predict/depot_1cmt_ppa_ir3_ppa_predict_observed_subjects.stan")
 
-preds <- model$generate_quantities(fit %>%
-                                     as_draws_array() %>%
+preds <- model$generate_quantities(fit$draws() %>%
                                      thin_draws(10),
                                    data = stan_data,
                                    parallel_chains = 4,
@@ -124,47 +123,68 @@ preds <- model$generate_quantities(fit %>%
 
 preds_df <- preds$draws(format = "draws_df")
 
-rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data")))
+rm(list = setdiff(ls(), c("preds_df", "new_data", "nonmem_data", "stan_data")))
+gc()
 
-post_preds_summary <- preds_df %>%
-  spread_draws(c(pred, ipred, dv)[i]) %>%
-  mean_qi(pred, ipred, dv) %>% 
+## This is cleaner, but can be really slow for bigger datasets, so I'll do them
+## separately here
+# post_preds <- preds_df %>%
+#   spread_draws(c(epred_stan, epred, ipred, dv)[i])
+
+post_epred <- preds_df %>%
+  spread_draws(epred[i]) 
+
+post_epred_stan <- preds_df %>%
+  spread_draws(epred_stan[i]) 
+
+post_ipred <- preds_df %>%
+  spread_draws(ipred[i]) 
+
+post_dv <- preds_df %>%
+  spread_draws(dv[i]) 
+
+post_preds <- post_epred %>% 
+  inner_join(post_epred_stan) %>% 
+  inner_join(post_ipred) %>% 
+  inner_join(post_dv) 
+
+post_preds_summary <- post_preds %>% 
+  mean_qi(epred_stan, epred, ipred, dv, .width = 0.95) %>%
   mutate(ID = new_data$ID[i],
          time = new_data$time[i],
          cmt = new_data$cmt[i]) %>% 
   left_join(nonmem_data %>% 
-              filter(mdv == 0) %>%
-              select(ID, time, cmt, DV), 
-            by = c("ID", "time", "cmt")) %>% 
+              filter(evid == 0) %>%
+              select(ID, time, cmt, bloq, lloq, DV), 
+            by = c("ID", "time", "cmt")) %>%
   mutate(cmt = case_when(cmt == 2 ~ "PK",
                          cmt == 3 ~ "PD",
-                         TRUE ~ NA_character_) %>% 
+                         .default = NA_character_) %>% 
            factor(levels = c("PK", "PD"))) %>% 
-  select(ID, time, everything(), -i) %>% 
-  filter(!is.na(cmt))
+  filter(!is.na(cmt)) %>% 
+  rowwise() %>% 
+  # Note: for BLOQ values, I impute a value for DV only for plotting purposes.
+  # It can easily be filtered out or done differently
+  mutate(lower_for_bloq_sim = if_else(is.na(bloq), 0, min(ipred.lower, lloq)),
+         upper_for_bloq_sim = if_else(is.na(bloq), 1, min(ipred.upper, lloq)),
+         DV = case_when(bloq == 0 ~ DV, 
+                        bloq == 1 ~ runif(1, lower_for_bloq_sim, 
+                                          upper_for_bloq_sim),
+                        .default = NA_real_)) %>% 
+  ungroup() %>% 
+  select(ID, time, everything(), -i, -contains("for_bloq_sim"))
 
-ggplot(post_preds_summary, aes(x = time, group = ID)) +
-  geom_ribbon(aes(ymin = dv.lower, ymax = dv.upper),
-              fill = "blue", alpha = 0.25, show.legend = FALSE) +
-  geom_ribbon(aes(ymin = ipred.lower, ymax = ipred.upper),
-              fill = "blue", alpha = 0.5, show.legend = FALSE) +
-  geom_line(aes(y = ipred), linetype = 1, size = 1.15) +
-  geom_line(aes(y = pred), linetype = 2, size = 1.05) +
-  geom_point(aes(y = DV), size = 2, show.legend = FALSE, 
-             color = "red") +
-  scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                     trans = "log10",
-                     limits = c(NA, NA)) +
-  scale_x_continuous(name = "Time (h)",
-                     breaks = seq(0, 216, by = 24),
-                     labels = seq(0, 216, by = 24),
-                     limits = c(0, NA)) +
-  theme_bw() +
-  theme(axis.text = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 18, face = "bold"),
-        legend.position = "bottom") +
-  facet_trelliscope(~ ID + cmt, nrow = 3, ncol = 4, scales = "free")
-
+post_preds <- post_preds %>%
+  ungroup() %>% 
+  mutate(ID = new_data$ID[i],
+         time = new_data$time[i],
+         cmt = new_data$cmt[i]) %>% 
+  left_join(nonmem_data %>% 
+              filter(evid == 0) %>%
+              select(ID, time, cmt, DV), 
+            by = c("ID", "time", "cmt"),
+            relationship = "many-to-many") %>%
+  select(ID, time, everything())
 
 tmp <- ggplot(post_preds_summary) +
   ggforce::facet_wrap_paginate(~ID + cmt, labeller = label_both,
@@ -172,33 +192,72 @@ tmp <- ggplot(post_preds_summary) +
                                page = 1, scales = "free_y")
 
 for(i in 1:ggforce::n_pages(tmp)){
+  
   print(ggplot() +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = ipred.lower, 
-                                    ymax = ipred.upper, group = ID),
-                      fill = "blue", alpha = 0.5, show.legend = FALSE) +
-          geom_ribbon(data = post_preds_summary, 
-                      mapping = aes(x = time, ymin = dv.lower, 
-                                    ymax = dv.upper, group = ID),
-                      fill = "blue", alpha = 0.25, show.legend = FALSE) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = ipred, 
-                                  group = ID),
-                    linetype = 1, linewidth = 1.15) +
-          geom_line(data = post_preds_summary, 
-                    mapping = aes(x = time, y = pred, 
-                                  group = ID),
-                    linetype = 2, linewidth = 1.05) +
-          geom_point(data = post_preds_summary %>% 
-                       filter(!is.na(DV)), 
-                     mapping = aes(x = time, y = DV, group = ID),
-                     size = 2, color = "red", show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, y = epred, ymin = epred.lower,
+                                        ymax = epred.upper, group = ID),
+                          fill = "red", color = "red", linewidth = 2,
+                          alpha = 0.25, show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, ymin = dv.lower,
+                                        ymax = dv.upper, group = ID),
+                          fill = "blue", linewidth = 2, 
+                          alpha = 0.25, show.legend = FALSE) +
+          geom_lineribbon(data = post_preds_summary,
+                          mapping = aes(x = time, y = ipred, ymin = ipred.lower,
+                                        ymax = ipred.upper, group = ID),
+                          fill = "blue", color = "blue", linewidth = 2,
+                          alpha = 0.5, show.legend = FALSE) +
+          geom_point(data = post_preds_summary, # %>% filter(bloq == 0),
+                     mapping = aes(x = time, y = DV, group = ID, color = factor(bloq)),
+                     size = 2, show.legend = FALSE) +
+          scale_color_manual(values = c("0" = "black", "1" = "green")) +
+          scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
+                             limits = c(NA, NA),
+                             trans = "log10") +
+          scale_x_continuous(name = "Time (h)",
+                             breaks = seq(0, max(nonmem_data$time), by = 24),
+                             labels = seq(0, max(nonmem_data$time), by = 24),
+                             limits = c(0, max(nonmem_data$time))) +
+          theme_bw() +
+          theme(axis.text = element_text(size = 14, face = "bold"),
+                axis.title = element_text(size = 18, face = "bold"),
+                legend.position = "bottom") +
+          ggforce::facet_wrap_paginate(~ ID + cmt, labeller = label_both,
+                                       nrow = 3, ncol = 4,
+                                       page = i, scales = "free"))
+  
+  
+}
+
+for(i in 1:ggforce::n_pages(tmp)){
+  print(ggplot(data = post_preds %>% 
+                 sample_draws(ndraws = 50) %>% 
+                 mutate(cmt = case_when(cmt == 2 ~ "PK",
+                                        cmt == 3 ~ "PD",
+                                        .default = NA_character_) %>% 
+                          factor(levels = c("PK", "PD"))) %>% 
+                 filter(!is.na(cmt))) +
+          geom_line(mapping = aes(x = time, y = epred_stan, group = .draw),
+                    color = "red", linewidth = 0.5,
+                    alpha = 0.15, show.legend = FALSE) +
+          # geom_line(mapping = aes(x = time, y = dv, group = .draw),
+          #           color = "green", linewidth = 0.5,
+          #           alpha = 0.15, show.legend = FALSE) +
+          geom_line(mapping = aes(x = time, y = ipred, group = .draw),
+                    color = "blue", linewidth = 0.5,
+                    alpha = 0.15, show.legend = FALSE) +
+          geom_point(data = post_preds_summary, # %>% filter(bloq == 0),
+                     mapping = aes(x = time, y = DV, group = ID, color = factor(bloq)),
+                     size = 2, show.legend = FALSE) +
+          scale_color_manual(values = c("0" = "black", "1" = "green")) +
           scale_y_continuous(name = latex2exp::TeX("$Drug\\;Conc.\\;(\\mu g/mL)$"),
                              limits = c(NA, NA),
                              trans = "identity") +
           scale_x_continuous(name = "Time (h)",
-                             breaks = seq(0, max(nonmem_data$time), by = 14),
-                             labels = seq(0, max(nonmem_data$time), by = 14),
+                             breaks = seq(0, max(nonmem_data$time), by = 24),
+                             labels = seq(0, max(nonmem_data$time), by = 24),
                              limits = c(0, max(nonmem_data$time))) +
           theme_bw() +
           theme(axis.text = element_text(size = 14, face = "bold"),
@@ -211,18 +270,34 @@ for(i in 1:ggforce::n_pages(tmp)){
 }
 
 ## Individual estimates (posterior mean)
-est_ind <- preds_df %>%
-  spread_draws(c(CL, VC, KA, 
-                 auc_ss, c_max, t_max, t_half,
-                 KIN, KOUT, SC50, SMAX, t_max_pd, r_max)[ID]) %>% 
-  mean_qi() %>% 
-  select(ID, CL, VC, KA, 
-         auc_ss, c_max, t_max, t_half,
-         KIN, KOUT, SC50, SMAX, t_max_pd, r_max) %>% 
-  inner_join(post_preds_summary %>% 
-               filter(time == 168, cmt == "PK") %>% 
-               select(ID, c_trough = "ipred") %>% 
-               distinct(),
-             by = "ID")
+est_ind <- if(stan_data$want_auc_cmax){
+  preds_df %>%
+    spread_draws(c(CL, VC, KA, 
+                   auc_ss, c_max, t_max, t_half,
+                   KIN, KOUT, SC50, SMAX, t_max_pd, r_max)[ID]) %>% 
+    mean_qi() %>% 
+    select(ID, CL, VC, KA, 
+           auc_ss, c_max, t_max, t_half,
+           KIN, KOUT, SC50, SMAX, t_max_pd, r_max) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168, cmt == "PK") %>% 
+                 select(ID, c_trough = "ipred") %>% 
+                 distinct(),
+               by = "ID")
+}else{
+  preds_df %>%
+    spread_draws(c(CL, VC, KA, t_half,
+                   KIN, KOUT, SC50, SMAX)[ID]) %>% 
+    mean_qi() %>% 
+    select(ID, CL, VC, KA, t_half,
+           KIN, KOUT, SC50, SMAX) %>% 
+    inner_join(post_preds_summary %>% 
+                 filter(time == 168, cmt == "PK") %>% 
+                 select(ID, c_trough = "ipred") %>% 
+                 distinct(),
+               by = "ID")
+}
 
-est_ind
+est_ind %>% 
+  as_tibble()
+
