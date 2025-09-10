@@ -1,6 +1,8 @@
 rm(list = ls())
 cat("\014")
 
+library(tidybayes)
+library(bayesplot)
 library(patchwork)
 library(cmdstanr)
 library(tidyverse)
@@ -24,11 +26,11 @@ nonmem_data %>%
             n_bloq = sum(bloq)) %>%
   filter(n_bloq > 0)
 
-(p_pk <- ggplot(nonmem_data %>% 
-                  group_by(ID) %>% 
-                  mutate(Dose = factor(max(amt))) %>% 
-                  ungroup() %>% 
-                  filter(!is.na(DV), cmt == 2, bloq == 0) %>% 
+(p_pk <- ggplot(nonmem_data %>%
+                  group_by(ID) %>%
+                  mutate(Dose = factor(max(amt))) %>%
+                  ungroup() %>%
+                  filter(!is.na(DV), cmt == 2, bloq == 0) %>%
                   mutate(cmt = factor(case_when(cmt == 2 ~ "PK",
                                                 cmt == 3 ~ "PD",
                                                 TRUE ~ "Dosing"),
@@ -37,18 +39,18 @@ nonmem_data %>%
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
     scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
-                       trans = "log10") + 
+                       trans = "log10") +
     scale_x_continuous(name = "Time (h)",
                        breaks = seq(0, max(nonmem_data$time), by = 24),
                        labels = seq(0, max(nonmem_data$time), by = 24),
                        limits = c(0, max(nonmem_data$time))) +
     facet_wrap(~ cmt, scales = "free"))
 
-(p_pd <- ggplot(nonmem_data %>% 
-                  group_by(ID) %>% 
-                  mutate(Dose = factor(max(amt))) %>% 
-                  ungroup() %>% 
-                  filter(!is.na(DV), cmt == 3, bloq == 0) %>% 
+(p_pd <- ggplot(nonmem_data %>%
+                  group_by(ID) %>%
+                  mutate(Dose = factor(max(amt))) %>%
+                  ungroup() %>%
+                  filter(!is.na(DV), cmt == 3, bloq == 0) %>%
                   mutate(cmt = factor(case_when(cmt == 2 ~ "PK",
                                                 cmt == 3 ~ "PD",
                                                 TRUE ~ "Dosing"),
@@ -57,14 +59,14 @@ nonmem_data %>%
     geom_line(mapping = aes(x = time, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
     scale_y_continuous(name = latex2exp::TeX("Response (unit)"),
-                       trans = "log10") + 
+                       trans = "log10") +
     scale_x_continuous(name = "Time (h)",
                        breaks = seq(0, max(nonmem_data$time), by = 24),
                        labels = seq(0, max(nonmem_data$time), by = 24),
                        limits = c(0, max(nonmem_data$time))) +
     facet_wrap(~ cmt, scales = "free"))
 
-p_pk + 
+p_pk +
   p_pd +
   plot_layout(guides = 'collect') &
   theme(legend.position = "bottom")
@@ -137,14 +139,14 @@ stan_data <- list(n_subjects = n_subjects,
                   scale_omega_smax = 0.4,
                   lkj_df_omega_pd = 2,
                   scale_sigma_p_pd = 0.5,
-                  prior_only = 0,
-                  no_gq_predictions = 0) 
+                  prior_only = 1,
+                  no_gq_predictions = 0)
 
 model <- cmdstan_model(
   "depot_1cmt_linear_ir4/Stan/Fit/depot_1cmt_prop_ir4_prop.stan",
   cpp_options = list(stan_threads = TRUE))
 
-fit <- model$sample(
+prior <- model$sample(
   data = stan_data,
   seed = 11235,
   chains = 4,
@@ -153,10 +155,8 @@ fit <- model$sample(
   iter_warmup = 500,
   iter_sampling = 1000,
   adapt_delta = 0.8,
-  refresh = 100,
+  refresh = 500,
   max_treedepth = 10,
-  output_dir = "depot_1cmt_linear_ir4/Stan/Fits/Output",
-  output_basename = "prop_prop",
   init = function() 
     with(stan_data,
          list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
@@ -176,8 +176,106 @@ fit <- model$sample(
                                            scale_omega_smax))),
               sigma_p_pd = abs(rnorm(1, 0, scale_sigma_p_pd)))))
 
+prior_df <- prior$draws(format = "draws_df") %>%  
+  drop_na()
 
-fit$save_object("depot_1cmt_linear_ir4/Stan/Fits/depot_1cmt_prop_ir4_prop.rds")
+prior_preds_summary <- prior_df %>%
+  spread_draws(c(ipred, epred, dv_ppc)[i]) %>% 
+  mean_qi(ipred, epred, dv_ppc, .width = 0.95) %>%
+  mutate(DV = nonmem_data$DV[nonmem_data$evid == 0][i],
+         bloq = nonmem_data$bloq[nonmem_data$evid == 0][i],
+         lloq = nonmem_data$lloq[nonmem_data$evid == 0][i],
+         ID = nonmem_data$ID[nonmem_data$evid == 0][i],
+         time = nonmem_data$time[nonmem_data$evid == 0][i],
+         cmt = nonmem_data$cmt[nonmem_data$evid == 0][i]) %>% 
+  rowwise() %>% 
+  mutate(lower_for_bloq_sim = min(ipred.lower, lloq),
+         upper_for_bloq_sim = min(ipred.upper, lloq),
+         DV = case_when(bloq == 0 ~ DV, 
+                        bloq == 1 ~ runif(1, lower_for_bloq_sim, 
+                                          upper_for_bloq_sim),
+                        .default = NA_real_)) %>% 
+  ungroup() %>% 
+  select(-contains("for_bloq_sim"))
 
-fit$save_data_file(dir = "depot_1cmt_linear_ir4/Stan/Fits/Stan_Data",
-                   basename = "prop_prop", timestamp = FALSE, random = FALSE)
+tmp <- ggplot(prior_preds_summary) +
+  ggforce::facet_wrap_paginate(~ID + cmt, labeller = label_both,
+                               nrow = 3, ncol = 4,
+                               page = 1, scales = "free_y")
+
+for(i in 1:ggforce::n_pages(tmp)){
+  print(ggplot() +
+          geom_ribbon(data = prior_preds_summary,
+                      mapping = aes(x = time, ymin = dv_ppc.lower,
+                                    ymax = dv_ppc.upper, group = ID),
+                      fill = "blue", alpha = 0.25, show.legend = FALSE) +
+          geom_point(data = prior_preds_summary, # %>% filter(bloq == 0),
+                     mapping = aes(x = time, y = DV, group = ID, color = factor(bloq)),
+                     size = 2, show.legend = FALSE) +
+          scale_color_manual(values = c("0" = "black", "1" = "green")) +
+          scale_y_continuous(name = "Conc. or Response",
+                             limits = c(NA, NA),
+                             trans = "identity") +
+          scale_x_continuous(name = "Time (h)",
+                             breaks = seq(0, max(nonmem_data$time), by = 24),
+                             labels = seq(0, max(nonmem_data$time), by = 24),
+                             limits = c(0, max(nonmem_data$time))) +
+          theme_bw() +
+          theme(axis.text = element_text(size = 14, face = "bold"),
+                axis.title = element_text(size = 18, face = "bold"),
+                legend.position = "bottom") +
+          ggforce::facet_wrap_paginate(~ ID + cmt, labeller = label_both,
+                                       nrow = 3, ncol = 4,
+                                       page = i, scales = "free"))
+  
+}
+
+cols_pk <- nonmem_data %>% 
+  filter(evid == 0, bloq == 0) %>% 
+  mutate(row_num = row_number()) %>% 
+  filter(cmt == 2) %>% 
+  pull(row_num)
+
+cols_pd <- nonmem_data %>% 
+  filter(evid == 0, bloq == 0) %>% 
+  mutate(row_num = row_number()) %>% 
+  filter(cmt == 3) %>% 
+  pull(row_num)
+
+(ppc_dens_overlay_pk <- 
+    ppc_dens_overlay(nonmem_data %>% 
+                       filter(evid == 0, bloq == 0, cmt == 2) %>% 
+                       pull(DV), 
+                     prior_df %>%
+                       select(contains("epred[")) %>% 
+                       select(-(nonmem_data %>% 
+                                  filter(evid == 0) %>% 
+                                  mutate(i = row_number()) %>% 
+                                  filter(bloq == 1) %>% 
+                                  pull(i))) %>% 
+                       select(all_of(cols_pk)) %>% 
+                       slice_sample(n = 1000) %>% 
+                       as.matrix()) +
+    scale_x_continuous(trans = "log10",
+                       limits = c(min(nonmem_data %>% 
+                                        filter(evid == 0, bloq == 0, cmt == 2) %>% 
+                                        pull(DV))/1000, NA)))
+
+(ppc_dens_overlay_pd <- 
+    ppc_dens_overlay(nonmem_data %>% 
+                       filter(evid == 0, bloq == 0, cmt == 3) %>% 
+                       pull(DV), 
+                     prior_df %>%
+                       select(contains("epred[")) %>% 
+                       select(-(nonmem_data %>% 
+                                  filter(evid == 0) %>% 
+                                  mutate(i = row_number()) %>% 
+                                  filter(bloq == 1) %>% 
+                                  pull(i))) %>% 
+                       select(all_of(cols_pd)) %>% 
+                       slice_sample(n = 1000) %>% 
+                       as.matrix()) +
+    scale_x_continuous(trans = "log10",
+                       limits = c(min(nonmem_data %>% 
+                                        filter(evid == 0, bloq == 0, cmt == 3) %>% 
+                                        pull(DV))/1000, NA)))
