@@ -1438,8 +1438,8 @@ ggplot() +
   guides(color = "none") +
   ggtitle("Individual Parameter Posterior Densities") 
 
+
 blah_pd <- draws_df %>%
-  blah_pd <- draws_df %>%
   gather_draws(KIN[ID], KOUT[ID], SC50[ID], SMAX[ID],
                TVKIN, TVKOUT, TVSC50, TVSMAX) %>%
   ungroup() %>%
