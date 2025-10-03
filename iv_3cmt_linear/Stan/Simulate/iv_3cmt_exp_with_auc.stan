@@ -1,17 +1,44 @@
 // IV infusion
 // Three-compartment PK Model
 // IIV on CL, VC, Q1, VP1, Q2, and VP2 (full covariance matrix)
-// proportional plus additive error - DV = IPRED*(1 + eps_p) + eps_a
-// General ODE solution using Torsten
-// Output includes individual AUC since 0 for every timepoint, AUC between 
-//   t1 and t2 (like a dosing interval), and each elimination half-life. If you 
-//   want Cmax and Tmax, make sure to simulate the end of the infusion and pull 
-//   that time and concentration out.
+// exponential error - DV = IPRED*exp(eps)
+// Either of matrix-exponential or general ODE solution using Torsten
+// Observations are generated from a normal that is truncated below at 0
+// Output can include individual AUC since 0 for every timepoint and AUC between 
+//   t1 and t2 (like a dosing interval) for the ODE solvers. All solvers return
+//   each elimination half-life. If you want Cmax and Tmax, make sure to 
+//   simulate the end of the infusion and pull that time and concentration out.
 
 functions{
   
   vector iv_3cmt_ode(real t, vector y, array[] real params, 
                      array[] real x_r, array[] int x_i){
+    
+    real cl = params[1];
+    real vc = params[2];
+    real q1 = params[3];
+    real vp1 = params[4];
+    real q2 = params[5];
+    real vp2 = params[6];
+    
+    real ke = cl/vc;
+    real k_cp1 = q1/vc;
+    real k_p1c = q1/vp1;
+    real k_cp2 = q2/vc;
+    real k_p2c = q2/vp2;
+    
+    vector[3] dydt;
+
+    dydt[1] = -(ke + k_cp1 + k_cp2)*y[1] + k_p1c*y[2] + k_p2c*y[3];  // central
+    dydt[2] = k_cp1*y[1] - k_p1c*y[2];                               // peripheral 1
+    dydt[3] = k_cp2*y[1] - k_p2c*y[3];                               // peripheral 2
+    
+    return dydt;
+    
+  }
+  
+  vector iv_3cmt_with_auc_ode(real t, vector y, array[] real params, 
+                              array[] real x_r, array[] int x_i){
     
     real cl = params[1];
     real vc = params[2];
@@ -38,6 +65,7 @@ functions{
     dydt[5] = t >= t_1 && t <= t_2 ? y[1] : 0;                       // AUC_t_1-t_2
     
     return dydt;
+    
   }
   
 }
@@ -83,17 +111,23 @@ data{
   real<lower = 0> t_1;
   real<lower = t_1> t_2;
   
+  int<lower = 0, upper = 1> want_auc; // non-coupled only
+  int<lower = 1, upper = 4> solver;   // 1 = linear ode, 2 = rk45, 3 = bdf, 4 = adams (2, 3, 4 can return AUC if desired)
+  
 }
 transformed data{
   
   int n_random = 6;
-  int n_cmt = 5;
+  
+  int n_cmt_pk = 3;    // number of ODEs in PK model (central, peripheral 1, peripheral 2)
+  int n_cmt_extra = 2; // number of ODEs for AUC and AUC_t1_t2.
+  int n_cmt = want_auc ? n_cmt_pk + n_cmt_extra : n_cmt_pk;
   
   vector[n_random] omega = [omega_cl, omega_vc, omega_q1, omega_vp1, 
                                                 omega_q2, omega_vp2]';
   
   matrix[n_random, n_random] L = cholesky_decompose(R);
-
+  
   array[n_cmt] real bioav = rep_array(1.0, n_cmt); // Hardcoding, but could be data or a parameter in another situation
   array[n_cmt] real tlag = rep_array(0.0, n_cmt);  // Hardcoding, but could be data or a parameter in another situation
   
@@ -145,7 +179,7 @@ generated quantities{
     VP2 = col(theta, 6);
     
     for(j in 1:n_subjects){
-        
+      
       real ke = CL[j]/VC[j];
       real k_cp1 = Q1[j]/VC[j];
       real k_p1c = Q1[j]/VP1[j];
@@ -166,29 +200,142 @@ generated quantities{
       real lambda_1 = jay/3 + cbrt(rho)*(cos(delta/3) + sqrt(3)*sin(delta/3));
       real lambda_2 = jay/3 + cbrt(rho)*(cos(delta/3) - sqrt(3)*sin(delta/3));
       real lambda_3 = jay/3 - 2*cbrt(rho)*cos(delta/3);
+      
+      if(want_auc){
+        if(solver == 1){
+          reject("This doesn't return AUC with the linear solver.");
+        }else if(solver == 2){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_rk45(iv_3cmt_with_auc_ode,
+                           n_cmt,
+                           time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                           bioav, tlag, x_r)';
+          
+        }else if(solver == 3){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_bdf(iv_3cmt_with_auc_ode,
+                          n_cmt,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                          bioav, tlag, x_r)';
+          
+        }else{
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_adams(iv_3cmt_with_auc_ode,
+                           n_cmt,
+                           time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                           bioav, tlag, x_r)';
+          
+        }
         
-      x_ipred[subj_start[j]:subj_end[j],] =
-        pmx_solve_rk45(iv_3cmt_ode,
-                       n_cmt,
-                       time[subj_start[j]:subj_end[j]],
-                       amt[subj_start[j]:subj_end[j]],
-                       rate[subj_start[j]:subj_end[j]],
-                       ii[subj_start[j]:subj_end[j]],
-                       evid[subj_start[j]:subj_end[j]],
-                       cmt[subj_start[j]:subj_end[j]],
-                       addl[subj_start[j]:subj_end[j]],
-                       ss[subj_start[j]:subj_end[j]],
-                       {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
-                       bioav, tlag, x_r)';
-                         
+        auc[subj_start[j]:subj_end[j]] = 
+                                x_ipred[subj_start[j]:subj_end[j], 4] ./ VC[j];
+      
+        auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
+        
+      }else{
+        if(solver == 1){
+          
+          matrix[n_cmt, n_cmt] K = rep_matrix(0, n_cmt, n_cmt);
+          K[1, 1] = -(ke + k_cp1 + k_cp2);
+          K[1, 2] = k_p1c;
+          K[1, 3] = k_p2c;
+          K[2, 1] = k_cp1;
+          K[2, 2] = -k_p1c;
+          K[3, 1] = k_cp2;
+          K[3, 3] = -k_p2c;
+        
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_linode(time[subj_start[j]:subj_end[j]],
+                             amt[subj_start[j]:subj_end[j]],
+                             rate[subj_start[j]:subj_end[j]],
+                             ii[subj_start[j]:subj_end[j]],
+                             evid[subj_start[j]:subj_end[j]],
+                             cmt[subj_start[j]:subj_end[j]],
+                             addl[subj_start[j]:subj_end[j]],
+                             ss[subj_start[j]:subj_end[j]],
+                             K, bioav, tlag)';
+          
+        }else if(solver == 2){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_rk45(iv_3cmt_ode,
+                           n_cmt,
+                           time[subj_start[j]:subj_end[j]],
+                           amt[subj_start[j]:subj_end[j]],
+                           rate[subj_start[j]:subj_end[j]],
+                           ii[subj_start[j]:subj_end[j]],
+                           evid[subj_start[j]:subj_end[j]],
+                           cmt[subj_start[j]:subj_end[j]],
+                           addl[subj_start[j]:subj_end[j]],
+                           ss[subj_start[j]:subj_end[j]],
+                           {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                           bioav, tlag, x_r)';
+          
+        }else if(solver == 3){
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_bdf(iv_3cmt_ode,
+                          n_cmt,
+                          time[subj_start[j]:subj_end[j]],
+                          amt[subj_start[j]:subj_end[j]],
+                          rate[subj_start[j]:subj_end[j]],
+                          ii[subj_start[j]:subj_end[j]],
+                          evid[subj_start[j]:subj_end[j]],
+                          cmt[subj_start[j]:subj_end[j]],
+                          addl[subj_start[j]:subj_end[j]],
+                          ss[subj_start[j]:subj_end[j]],
+                          {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                          bioav, tlag, x_r)';
+          
+        }else{
+          
+          x_ipred[subj_start[j]:subj_end[j],] =
+            pmx_solve_adams(iv_3cmt_ode,
+                            n_cmt,
+                            time[subj_start[j]:subj_end[j]],
+                            amt[subj_start[j]:subj_end[j]],
+                            rate[subj_start[j]:subj_end[j]],
+                            ii[subj_start[j]:subj_end[j]],
+                            evid[subj_start[j]:subj_end[j]],
+                            cmt[subj_start[j]:subj_end[j]],
+                            addl[subj_start[j]:subj_end[j]],
+                            ss[subj_start[j]:subj_end[j]],
+                            {CL[j], VC[j], Q1[j], VP1[j], Q2[j], VP2[j]}, 
+                            bioav, tlag, x_r)';
+          
+        }
+      }
+      
       ipred[subj_start[j]:subj_end[j]] = 
                       x_ipred[subj_start[j]:subj_end[j], 1] ./ VC[j];
                       
-      auc[subj_start[j]:subj_end[j]] = 
-                                x_ipred[subj_start[j]:subj_end[j], 4] ./ VC[j];
-      
-      auc_t1_t2[j] = max(x_ipred[subj_start[j]:subj_end[j], 5]) / VC[j];
-      
       t_half_alpha[j] = log(2)/lambda_1;
       t_half_beta[j] = log(2)/lambda_2;
       t_half_terminal[j] = log(2)/lambda_3;

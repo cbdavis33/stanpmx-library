@@ -1,9 +1,9 @@
 rm(list = ls())
 cat("\014")
 
-library(trelliscopejs)
 library(mrgsolve)
 library(tidybayes)
+library(patchwork)
 library(cmdstanr)
 library(tidyverse)
 
@@ -12,9 +12,9 @@ set_cmdstan_path("~/Torsten/cmdstan")
 TVCL <- 2.5    # L/m
 TVVC <- 4.5    # L
 TVQ1 <- 2      # L/m
-TVVP1 <- 4     # L
+TVVP1 <- 8     # L
 TVQ2 <- 0.1    # L/m
-TVVP2 <- 5     # L
+TVVP2 <- 3     # L
 
 omega_cl <- 0.3
 omega_vc <- 0.3
@@ -109,28 +109,45 @@ stan_data <- list(n_subjects = n_subjects,
                   sigma_a = sigma_a,
                   cor_p_a = cor_p_a,
                   t_1 = 0,
-                  t_2 = 180)
+                  t_2 = 180,
+                  want_auc = 1,
+                  solver = 2) # 1 = linear ODE (no AUC), 2 = rk45, 3 = bdf, 4 = adams (2, 3, 4 can return AUC)
 
 model <- cmdstan_model("iv_3cmt_linear/Stan/Simulate/iv_3cmt_ppa_with_auc.stan") 
 
 simulated_data <- model$sample(data = stan_data,
                                fixed_param = TRUE,
-                               seed = 112358,
+                               seed = if_else(sigma_a == 0, 1123, 8675309),
                                iter_warmup = 0,
                                iter_sampling = 1,
                                chains = 1,
                                parallel_chains = 1)
 
-params_ind <- simulated_data$draws(c("CL", "VC", "Q1", "VP1", "Q2", "VP2",
-                                     "auc_t1_t2",
-                                     "t_half_alpha", "t_half_beta", 
-                                     "t_half_terminal")) %>% 
-  spread_draws(CL[ID], VC[ID], Q1[ID], VP1[ID], Q2[ID], VP2[ID],
-               auc_t1_t2[ID], 
-               t_half_alpha[ID], t_half_beta[ID], t_half_terminal[ID]) %>%
-  ungroup() %>%
-  select(ID, CL, VC, Q1, VP1, Q2, VP2, auc_t1_t2, 
-         t_half_alpha, t_half_beta, t_half_terminal)
+params_ind <- if(stan_data$want_auc){
+  
+  simulated_data$draws(c("CL", "VC", "Q1", "VP1", "Q2", "VP2",
+                         "auc_t1_t2",
+                         "t_half_alpha", "t_half_beta", 
+                         "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q1, VP1, Q2, VP2,
+                   auc_t1_t2, 
+                   t_half_alpha, t_half_beta, t_half_terminal)[ID]) %>%
+    ungroup() %>%
+    select(ID, CL, VC, Q1, VP1, Q2, VP2, auc_t1_t2, 
+           t_half_alpha, t_half_beta, t_half_terminal)
+  
+}else{
+  
+  simulated_data$draws(c("CL", "VC", "Q1", "VP1", "Q2", "VP2",
+                         "t_half_alpha", "t_half_beta", 
+                         "t_half_terminal")) %>% 
+    spread_draws(c(CL, VC, Q1, VP1, Q2, VP2,
+                   t_half_alpha, t_half_beta, t_half_terminal)[ID]) %>%
+    ungroup() %>%
+    select(ID, CL, VC, Q1, VP1, Q2, VP2, 
+           t_half_alpha, t_half_beta, t_half_terminal)
+  
+}
 
 data <- simulated_data$draws(c("dv", "ipred")) %>% 
   spread_draws(dv[i], ipred[i]) %>% 
@@ -150,17 +167,6 @@ data <- simulated_data$draws(c("dv", "ipred")) %>%
   relocate(DV, .after = last_col()) %>% 
   relocate(TIME, .before = DV)
 
-data %>% 
-  mutate(t_max = AMT/RATE) %>% 
-  select(ID, t_max) %>% 
-  drop_na() %>% 
-  inner_join(data %>% 
-               select(ID, IPRED, TIME)) %>% 
-  filter(t_max == TIME) %>% 
-  rename(c_max = IPRED) %>% 
-  select(-TIME) %>% 
-  inner_join(params_ind, by = "ID")
-
 params_ind <- params_ind %>% 
   inner_join(data %>% 
                mutate(t_max = AMT/RATE) %>% 
@@ -172,7 +178,6 @@ params_ind <- params_ind %>%
                rename(c_max = IPRED) %>% 
                select(-TIME), by = "ID")
 
-
 (p_1 <- ggplot(data %>% 
                  group_by(ID) %>% 
                  mutate(Dose = factor(max(AMT))) %>% 
@@ -181,22 +186,22 @@ params_ind <- params_ind %>%
     geom_point(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     geom_line(mapping = aes(x = TIME, y = DV, group = ID, color = Dose)) +
     theme_bw(18) +
-    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(ng/mL)$"),
+    scale_y_continuous(name = latex2exp::TeX("Drug Conc. $(\\mu g/mL)$"),
                        trans = "log10") + 
-    scale_x_continuous(name = "Time (m)",
-                       breaks = seq(0, max(data$TIME), by = 15),
-                       labels = seq(0, max(data$TIME), by = 15),
+    scale_x_continuous(name = "Time (h)",
+                       breaks = seq(0, max(data$TIME), by = 24),
+                       labels = seq(0, max(data$TIME), by = 24),
                        limits = c(0, max(data$TIME))))
-p_1 +
-  facet_trelliscope(~ID, nrow = 2, ncol = 2)
+
+prop_or_ppa <- if_else(sigma_a == 0, "prop", "ppa")
 
 data %>%
   select(-IPRED) %>%
-  # write_csv("iv_3cmt_linear/Data/iv_3cmt_prop.csv", na = ".")
-  write_csv("iv_3cmt_linear/Data/iv_3cmt_ppa.csv", na = ".")
+  write_csv(str_c("iv_3cmt_linear/Data/iv_3cmt_", prop_or_ppa, ".csv"),
+            na = ".")
 
 params_ind %>%
-  # write_csv("iv_3cmt_linear/Data/iv_3cmt_prop_params_ind.csv")
-  write_csv("iv_3cmt_linear/Data/iv_3cmt_ppa_params_ind.csv")
-
+  write_csv(str_c("iv_3cmt_linear/Data/iv_3cmt_", prop_or_ppa, 
+                  "_params_ind.csv"),
+            na = ".")
 

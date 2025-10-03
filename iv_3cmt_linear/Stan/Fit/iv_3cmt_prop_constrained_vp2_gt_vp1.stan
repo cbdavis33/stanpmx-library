@@ -171,7 +171,7 @@ data{
   real<lower = 0> location_tvq1;  // Prior Location parameter for Q1
   real<lower = 0> location_tvvp1; // Prior Location parameter for VP1
   real<lower = 0> location_tvq2;  // Prior Location parameter for Q2
-  real<lower = 0> location_tvvp2; // Prior Location parameter for VP2
+  real<lower = location_tvvp1> location_tvvp2; // Prior Location parameter for VP2
   
   real<lower = 0> scale_tvcl;     // Prior Scale parameter for CL
   real<lower = 0> scale_tvvc;     // Prior Scale parameter for VC
@@ -228,7 +228,7 @@ parameters{
   real<lower = 0> TVQ1;       
   real<lower = 0> TVVP1;
   real<lower = 0> TVQ2;       
-  real<lower = 0> TVVP2;
+  real<lower = TVVP1> TVVP2;
   
   vector<lower = 0>[n_random] omega;
   cholesky_factor_corr[n_random] L;
@@ -287,7 +287,7 @@ model{
   TVQ1 ~ lognormal(log(location_tvq1), scale_tvq1);
   TVVP1 ~ lognormal(log(location_tvvp1), scale_tvvp1);
   TVQ2 ~ lognormal(log(location_tvq2), scale_tvq2);
-  TVVP2 ~ lognormal(log(location_tvvp2), scale_tvvp2);
+  TVVP2 ~ lognormal(log(location_tvvp2), scale_tvvp2) T[TVVP1, ];
 
   omega ~ normal(0, scale_omega);
   L ~ lkj_corr_cholesky(lkj_df_omega);

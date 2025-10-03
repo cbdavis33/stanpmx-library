@@ -109,108 +109,42 @@ stan_data <- list(n_subjects = n_subjects,
                   lkj_df_omega = 2,
                   scale_sigma_p = 0.5,
                   prior_only = 0,
-                  no_gq_predictions = 0,
-                  solver = 1)
+                  no_gq_predictions = 0)
 
-model <- cmdstan_model("iv_3cmt_linear/Stan/Fit/iv_3cmt_prop_all_solvers.stan",
-                       cpp_options = list(stan_threads = TRUE))
+model <- cmdstan_model(
+  "iv_3cmt_linear/Stan/Fit/iv_3cmt_prop_constrained_vp2_gt_vp1.stan",
+  cpp_options = list(stan_threads = TRUE))
 
-fit_mat_exp <- model$sample(
+fit <- model$sample(
   data = stan_data,
   seed = 11235,
   chains = 4,
   parallel_chains = 4,
   threads_per_chain = parallel::detectCores()/4,
   iter_warmup = 500,
-  iter_sampling = 200,
+  iter_sampling = 1000,
   adapt_delta = 0.8,
   refresh = 50,
   max_treedepth = 10,
+  output_dir = "iv_3cmt_linear/Stan/Fits/Output",
+  output_basename = "prop_constrained_vp2_gt_vp1",
   init = function()
     with(stan_data,
          list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
               TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
               TVQ1 = rlnorm(1, log(location_tvq1), scale_tvq1),
-              TVVP1 = rlnorm(1, log(location_tvvp1), scale_tvvp1),
+              TVVP1 = rlnorm(1, log(location_tvvp1), 0.05*scale_tvvp1),
               TVQ2 = rlnorm(1, log(location_tvq2), scale_tvq2),
-              TVVP2 = rlnorm(1, log(location_tvvp2), scale_tvvp2),
-              omega = rlnorm(6, log(0.3), 0.3),
-              sigma_p = rlnorm(1, log(0.2), 0.3))))
+              TVVP2 = rlnorm(1, log(location_tvvp2), 0.05*scale_tvvp2),
+              omega = abs(rnorm(6, 0, c(scale_omega_cl,
+                                        scale_omega_vc,
+                                        scale_omega_q1,
+                                        scale_omega_vp1,
+                                        scale_omega_q2,
+                                        scale_omega_vp2))),
+              sigma_p = abs(rnorm(1, 0, scale_sigma_p)))))
 
-fit_mat_exp$save_object("iv_3cmt_linear/Stan/Fits/iv_3cmt_prop_mat_exp.rds")
+fit$save_object("iv_3cmt_linear/Stan/Fits/iv_3cmt_prop_constrained_vp2_gt_vp1.rds")
 
-
-stan_data$solver <- 2
-fit_rk45 <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 200,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function()
-    with(stan_data,
-         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
-              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
-              TVQ1 = rlnorm(1, log(location_tvq1), scale_tvq1),
-              TVVP1 = rlnorm(1, log(location_tvvp1), scale_tvvp1),
-              TVQ2 = rlnorm(1, log(location_tvq2), scale_tvq2),
-              TVVP2 = rlnorm(1, log(location_tvvp2), scale_tvvp2),
-              omega = rlnorm(6, log(0.3), 0.3),
-              sigma_p = rlnorm(1, log(0.2), 0.3))))
-
-fit_rk45$save_object("iv_3cmt_linear/Stan/Fits/iv_3cmt_prop_rk45.rds")
-
-stan_data$solver <- 3
-fit_bdf <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 200,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function()
-    with(stan_data,
-         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
-              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
-              TVQ1 = rlnorm(1, log(location_tvq1), scale_tvq1),
-              TVVP1 = rlnorm(1, log(location_tvvp1), scale_tvvp1),
-              TVQ2 = rlnorm(1, log(location_tvq2), scale_tvq2),
-              TVVP2 = rlnorm(1, log(location_tvvp2), scale_tvvp2),
-              omega = rlnorm(6, log(0.3), 0.3),
-              sigma_p = rlnorm(1, log(0.2), 0.3))))
-
-fit_bdf$save_object("iv_3cmt_linear/Stan/Fits/iv_3cmt_prop_bdf.rds")
-
-stan_data$solver <- 4
-fit_adams <- model$sample(
-  data = stan_data,
-  seed = 11235,
-  chains = 4,
-  parallel_chains = 4,
-  threads_per_chain = parallel::detectCores()/4,
-  iter_warmup = 500,
-  iter_sampling = 200,
-  adapt_delta = 0.8,
-  refresh = 50,
-  max_treedepth = 10,
-  init = function()
-    with(stan_data,
-         list(TVCL = rlnorm(1, log(location_tvcl), scale_tvcl),
-              TVVC = rlnorm(1, log(location_tvvc), scale_tvvc),
-              TVQ1 = rlnorm(1, log(location_tvq1), scale_tvq1),
-              TVVP1 = rlnorm(1, log(location_tvvp1), scale_tvvp1),
-              TVQ2 = rlnorm(1, log(location_tvq2), scale_tvq2),
-              TVVP2 = rlnorm(1, log(location_tvvp2), scale_tvvp2),
-              omega = rlnorm(6, log(0.3), 0.3),
-              sigma_p = rlnorm(1, log(0.2), 0.3))))
-
-fit_adams$save_object("iv_3cmt_linear/Stan/Fits/iv_3cmt_prop_adams.rds")
+fit$save_data_file(dir = "iv_3cmt_linear/Stan/Fits/Stan_Data",
+                   basename = "prop_constrained_vp2_gt_vp1", timestamp = FALSE, random = FALSE)
